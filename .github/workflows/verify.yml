@@ -1,0 +1,53 @@
+name: Independent service verification
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+      GOPROXY: "off"
+      TEST_DATABASE_URL: postgres://fixture:fixture-only@127.0.0.1:5432/postgres?sslmode=disable
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture-only
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U fixture" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.2
+          cache: false
+      - run: go vet -mod=vendor ./...
+      - shell: pwsh
+        run: ./scripts/Verify-ExecutionBoundary.ps1
+      - run: go test -mod=vendor -race -count=1 ./...
+      - shell: pwsh
+        run: ./scripts/Build.ps1
+      - run: docker build -t agent-os-runtime:ci .
+  windows:
+    runs-on: windows-latest
+    env:
+      GOWORK: "off"
+      GOPROXY: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.2
+          cache: false
+      - run: go test -mod=vendor -count=1 ./...
+      - shell: pwsh
+        run: ./scripts/Verify-ExecutionBoundary.ps1
+      - shell: pwsh
+        run: ./scripts/Build.ps1

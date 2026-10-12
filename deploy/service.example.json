@@ -1,0 +1,15 @@
+{
+  "LISTEN": "127.0.0.1:8094",
+  "DATABASE_URL": "<Runtime application role connection; search_path=public>",
+  "SERVICE_TOKEN": "<generate 32+ random bytes>",
+  "SERVICE_PEERS": "<JSON object: role to SHA-256 of peer token>",
+  "RUNTIME_URL": "http://127.0.0.1:8094",
+  "REGISTRY_URL": "http://127.0.0.1:8096",
+  "TOOLHUB_URL": "http://127.0.0.1:8091",
+  "STORAGE_URL": "http://127.0.0.1:8092",
+  "SANDBOX_URL": "http://127.0.0.1:8093",
+  "KNOWLEDGE_URL": "http://127.0.0.1:8095",
+  "DB_MAX_CONNS": "3",
+  "HTTP_MAX_CONCURRENT": "16",
+  "GOMEMLIMIT": "96MiB"
+}
