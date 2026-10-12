@@ -65,6 +65,7 @@ func evidenceWorkerDSN(t *testing.T, db *pgxpool.Pool, workerRole string) string
 
 func startEvidenceWorker(t *testing.T, ctx context.Context, binary string, config map[string]string) (*exec.Cmd, <-chan error) {
 	t.Helper()
+	instanceID := config["INSTANCE_ID"]
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "worker.json")
 	if err := os.WriteFile(configPath, JSON(config), 0600); err != nil {
@@ -104,7 +105,7 @@ func startEvidenceWorker(t *testing.T, ctx context.Context, binary string, confi
 				t.Error(e)
 				return
 			}
-			name := strings.NewReplacer("/", "-", "\\", "-").Replace(t.Name()) + "-" + config["INSTANCE_ID"] + ".log"
+			name := strings.NewReplacer("/", "-", "\\", "-").Replace(t.Name()) + "-" + instanceID + ".log"
 			if e = os.WriteFile(filepath.Join(evidence, name), body, 0600); e != nil {
 				t.Error(e)
 			}
