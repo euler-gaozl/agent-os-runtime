@@ -82,3 +82,49 @@ func (s *Store) sourceState(ctx context.Context, inv Invocation) (json.RawMessag
 	}
 	return json.RawMessage(response), tx.Commit(ctx)
 }
+
+// Operator-triggered recovery is limited to the state protocol whose reads,
+// successes and rejections are atomically frozen. Never use this to guess an
+// unknown external tool outcome or to run a cancelled task again.
+func (s *Store) resumeSourceState(ctx context.Context, id string) error {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var status, engine string
+	var cancelled bool
+	if err = tx.QueryRow(ctx, "SELECT status,engine,cancel_requested FROM runs WHERE id=$1 FOR UPDATE", id).Scan(&status, &engine, &cancelled); err != nil {
+		return err
+	}
+	if status != "waiting_unknown" || engine != EngineDSHSource || cancelled {
+		return stateError(409, "only non-cancelled source-state recovery may resume")
+	}
+	var method, manifest string
+	err = tx.QueryRow(ctx, `SELECT e.method,COALESCE(a.manifest_hash,'') FROM harness_exchanges e
+ LEFT JOIN harness_archives a ON a.run_id=e.run_id AND a.seq=e.seq
+ WHERE e.run_id=$1 ORDER BY e.seq DESC LIMIT 1`, id).Scan(&method, &manifest)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return stateError(409, "source-state exchange required")
+	}
+	if err != nil {
+		return err
+	}
+	if (method != "working_state_read" && method != "working_state_update") || manifest == "" {
+		return stateError(409, "last exchange is not acknowledged source state")
+	}
+	var unresolved bool
+	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM calls WHERE run_id=$1 AND status IN('inflight','unknown'))", id).Scan(&unresolved); err != nil {
+		return err
+	}
+	if unresolved {
+		return stateError(409, "unresolved calls require reconciliation")
+	}
+	if _, err = tx.Exec(ctx, "UPDATE runs SET status='queued',owner='',lease_until=NULL,updated_at=now() WHERE id=$1", id); err != nil {
+		return err
+	}
+	if err = event(ctx, tx, id, "source_state_resumed", map[string]string{"method": method}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

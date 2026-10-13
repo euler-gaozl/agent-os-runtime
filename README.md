@@ -90,8 +90,9 @@ reports remain historical evidence; none establishes measured production latency
 `working_state_read` and `working_state_update` frames. Historical engines reject
 these methods and retain their model/tool response format. `execution.New` only
 claims the three historical engines; `NewSourceEnabled` explicitly admits the new
-one after its caller verifies a separately pinned runner. No public submission
-option, Worker runner selection or deployment activation is implemented here yet.
+one after its caller verifies a separately pinned runner. The separate Worker
+candidate now verifies its compiled artifact pin before selecting this engine.
+Public submission and deployed activation remain separate gates.
 
 The Worker transports state invocations through `POST /v1/source-state` using its
 service identity. Runtime checks the live lease/fence, source engine, scoped
@@ -140,6 +141,31 @@ simulated by discarding the successful response in the test adapter; no actual
 network interruption or new-engine process kill occurred in these tests.
 
 ## Verification status
+
+The control-only `POST /v1/runs/{id}/resume-source-state` resolves exhausted
+source-state delivery retries. Under the run lock it requires the source engine,
+`waiting_unknown`, no cancellation, the **latest overall** exchange to be a
+state read/update with its own acknowledged archive, and no inflight/unknown
+calls of any kind. It atomically requeues and records an event without changing
+the frozen request, rule revision or response. Generic failed-run resume and
+tool reconciliation are unchanged. Source-state unknowns with no unresolved
+external calls can also be cancelled without replaying an update; active children
+retain the existing waiting-children convergence. These management additions are
+newer than published module tag `v0.1.0-rc.2`.
+
+Windows proof `p25-worker-source-167e0a2a71f948a7a324599c3b23816d` passed three
+actual Worker/Node source-engine scenarios: kill after state commit before reply,
+lost HTTP reply with Worker alive, and three dropped replies followed by explicit
+control recovery from `waiting_unknown`. Each used real PostgreSQL and Runtime,
+one actual Compact, 69 confirmed archive batches and 475,098 event bytes. Frozen
+state retained the dated observation omitted by the synthetic summary. No model,
+tool or state effect repeated. Eighteen integration pass records include recovery
+and cancellation boundary subtests; none skipped. Model, ToolHub routing and
+immutable Storage were fixtures; no paid provider or live installation changed.
+The first boundary run `e44de405...` failed because its synthetic unconfirmed
+archive violated a table CHECK; the corrected fixture uses a legal staging row.
+Its failure log remains retained. A later focused test also checks cancellation
+with an active child; final regression evidence is recorded in integration.
 
 Actual disposable PostgreSQL 18 tests cover concurrent claims/fencing, unknown effects, child cancellation, constraint changes, family model budgets, note revision/retirement and audit replay, partial-DDL/GRANT rollback, restricted Runtime/Worker roles and foreign-domain denial. The public facade test injects a lost archive acknowledgement and an exchange-response failure after a note effect committed, then advances the fence and replays without another effect. Storage/effect callbacks in that test are explicitly synthetic; real service/binary handoff is a separate integration gate.
 

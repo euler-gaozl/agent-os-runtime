@@ -30,10 +30,14 @@ type archiveHTTPFixture struct {
 }
 
 func newArchiveHTTPFixture(t *testing.T, runID string, afterPut func(*http.Request) bool) *archiveHTTPFixture {
+	return newArchiveHTTPFixtureToken(t, runID, afterPut, testToken)
+}
+
+func newArchiveHTTPFixtureToken(t *testing.T, runID string, afterPut func(*http.Request) bool, token string) *archiveHTTPFixture {
 	t.Helper()
 	a := &archiveHTTPFixture{bodies: map[string][]byte{}}
 	a.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != "PUT" || req.Header.Get("Authorization") != "Bearer "+testToken || req.Header.Get("X-Artifact-Root") != "run:"+runID {
+		if req.Method != "PUT" || req.Header.Get("Authorization") != "Bearer "+token || req.Header.Get("X-Artifact-Root") != "run:"+runID {
 			t.Error("archive identity or ownership envelope changed")
 			w.WriteHeader(http.StatusForbidden)
 			return

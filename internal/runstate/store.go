@@ -185,7 +185,15 @@ func (s *Store) Cancel(ctx context.Context, id string) error {
 	if e != nil {
 		return e
 	}
-	_, e = tx.Exec(ctx, `UPDATE runs r SET cancel_requested=true,status=CASE WHEN status IN('queued','waiting_children','failed') THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids)
+	// An unknown source-state delivery has no separate tool call to reconcile.
+	// The run lock serializes cancellation against its atomic state transaction;
+	// cancellation never retries that operation. Unknown external effects retain
+	// their existing reconciliation requirement.
+	_, e = tx.Exec(ctx, `UPDATE runs r SET cancel_requested=true,status=CASE WHEN status IN('queued','waiting_children','failed')
+ OR (status='waiting_unknown' AND engine=$2
+ AND (SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1) IN('working_state_read','working_state_update')
+ AND NOT EXISTS(SELECT 1 FROM calls c WHERE c.run_id=r.id AND c.status IN('inflight','unknown')))
+ THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, EngineDSHSource)
 	if e != nil {
 		return e
 	}
