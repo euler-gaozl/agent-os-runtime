@@ -9,7 +9,7 @@ try {
  Push-Location $root
  try {
   $suffix=if($IsWindows){'.exe'}else{''}
-  foreach($command in @('runtime','migrate','healthcheck')) {
+  foreach($command in @('runtime','migrate','retire-access','healthcheck')) {
    & go build -mod=vendor -trimpath -ldflags='-s -w' -o (Join-Path $destinationPath ($command+$suffix)) ("./cmd/"+$command)
    if($LASTEXITCODE){throw "Build failed: $command"}
   }

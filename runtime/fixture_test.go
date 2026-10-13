@@ -14,7 +14,7 @@ import (
 
 // Only TEST_DATABASE_URL is read. Tests create and drop an isolated fixture
 // database and NOLOGIN role, never migrate the database named in that URL.
-func fixtureDatabase(t *testing.T) (*pgxpool.Pool, string, string) {
+func fixtureDatabase(t *testing.T, relatedRoleSuffixes ...string) (*pgxpool.Pool, string, string) {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -40,6 +40,13 @@ func fixtureDatabase(t *testing.T) (*pgxpool.Pool, string, string) {
 	t.Cleanup(func() {
 		c, stop := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stop()
+		// Related roles are retired only after this fixture DB is dropped. This
+		// also removes grants issued by non-owner grantors before DROP ROLE.
+		for _, suffix := range relatedRoleSuffixes {
+			if _, e := admin.Exec(c, "DROP ROLE IF EXISTS "+pgx.Identifier{role + "_" + suffix}.Sanitize()); e != nil {
+				t.Error(e)
+			}
+		}
 		if _, e := admin.Exec(c, "DROP ROLE "+pgx.Identifier{role}.Sanitize()+", "+pgx.Identifier{workerRole}.Sanitize()); e != nil {
 			t.Error(e)
 		}

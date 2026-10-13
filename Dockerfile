@@ -4,7 +4,7 @@ ENV GOWORK=off GOPROXY=off CGO_ENABLED=0
 COPY go.mod go.sum ./
 COPY vendor ./vendor
 COPY . .
-RUN go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/service ./cmd/runtime && go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate && go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
+RUN go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/service ./cmd/runtime && go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate && go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/retire-access ./cmd/retire-access && go build -mod=vendor -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/ /usr/local/bin/

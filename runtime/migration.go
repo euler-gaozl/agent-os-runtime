@@ -68,22 +68,11 @@ func Migrate(ctx context.Context, db *pgxpool.Pool, runtimeRole, workerRole stri
 			return e
 		}
 	}
-	// Worker cannot create runs/notes, reconcile effects or touch another domain.
-	if e = grant("SELECT,UPDATE", "TABLE", "runs", workerRole); e != nil {
+	if e = grantWorkerAccess(ctx, tx, workerRole); e != nil {
 		return e
 	}
-	for _, table := range []string{"calls", "model_attempts", "harness_exchanges", "harness_archives"} {
-		if e = grant("SELECT,INSERT,UPDATE", "TABLE", table, workerRole); e != nil {
-			return e
-		}
-	}
-	if e = grant("SELECT,INSERT", "TABLE", "events", workerRole); e != nil {
+	if e = grant("USAGE,SELECT", "SEQUENCE", "events_seq_seq", runtimeRole); e != nil {
 		return e
-	}
-	for _, role := range []string{runtimeRole, workerRole} {
-		if e = grant("USAGE,SELECT", "SEQUENCE", "events_seq_seq", role); e != nil {
-			return e
-		}
 	}
 	if e = grant("USAGE,SELECT", "SEQUENCE", "note_audits_seq_seq", runtimeRole); e != nil {
 		return e
