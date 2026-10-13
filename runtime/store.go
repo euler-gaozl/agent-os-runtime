@@ -12,6 +12,7 @@ type Store struct {
 	*runstate.Store
 	CatalogURL, StorageURL string
 	Remote                 *serviceclient.Client
+	submissionEngine       string
 }
 
 func NewStore(db *pgxpool.Pool, remote *serviceclient.Client, storageURL string) *Store {

@@ -210,11 +210,11 @@ func testIndependentSourceWorker(t *testing.T, kill, exhausted bool) {
 	snap.Agent.ContextTokens = 32768
 	snap.Agent.MaxSteps = 50
 	snap.Agent.Model.MaxTokens = 512
-	id := submit(t, s, snap)
-	// Candidate activation only in this disposable administrative fixture.
-	if _, err := db.Exec(ctx, "UPDATE runs SET engine=$2 WHERE id=$1", id, EngineDSHSource); err != nil {
+	// Select only new roots through the same deployment option as the API.
+	if err := s.ConfigureSubmissionEngine(EngineDSHSource); err != nil {
 		t.Fatal(err)
 	}
+	id := submit(t, s, snap)
 	archives := newArchiveHTTPFixtureToken(t, id, nil, workerToken)
 	s.StorageURL = archives.server.URL
 	config := map[string]string{"DATABASE_URL": evidenceWorkerDSN(t, db, workerRole), "SERVICE_TOKEN": workerToken, "SERVICE_PEERS": string(JSON(map[string]string{"worker": servicehttp.TokenHash(workerToken)})), "RUNTIME_URL": runtimeServer.URL, "REGISTRY_URL": runtimeServer.URL, "TOOLHUB_URL": hub.URL, "STORAGE_URL": archives.server.URL, "AGENTOS_NODE": node, "DSH_SOURCE_RUNNER": runner, "LISTEN": "127.0.0.1:0", "INSTANCE_ID": "source-first-attempt", "DB_MAX_CONNS": "3"}

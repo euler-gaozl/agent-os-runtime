@@ -92,7 +92,8 @@ these methods and retain their model/tool response format. `execution.New` only
 claims the three historical engines; `NewSourceEnabled` explicitly admits the new
 one after its caller verifies a separately pinned runner. The separate Worker
 candidate now verifies its compiled artifact pin before selecting this engine.
-Public submission and deployed activation remain separate gates.
+Normal submission can now select the candidate through the deployment option
+below. Deployed activation remains a separate gate.
 
 The Worker transports state invocations through `POST /v1/source-state` using its
 service identity. Runtime checks the live lease/fence, source engine, scoped
@@ -141,6 +142,32 @@ simulated by discarding the successful response in the test adapter; no actual
 network interruption or new-engine process kill occurred in these tests.
 
 ## Verification status
+
+`DEFAULT_RUN_ENGINE` defaults to `dsh-0.2.0-rc.2-evidence-v1`; the only alternative
+for new root submissions is `dsh-source-639ed015-state-v1`. Unknown values fail
+startup. Configure once before serving traffic. Both control and published-app
+submissions use this setting; client bodies and Agent definitions cannot select
+an engine. The setting is not part of the user-input idempotency hash: a retry
+after a deployment change returns the original run and engine. Children inherit
+their parent's engine even after the default changes. This accepts configuration,
+not proof of compatible Workers; deployment guards must verify migration and
+pinned source-enabled Workers before opting in. No live configuration changed.
+
+Control-only `GET /v1/runs/{id}/source-recovery` returns an advisory eligibility
+snapshot and machine-readable reason. The action below locks the run and reads
+the same conditions again, so cancellation after preview still prevents resume.
+The endpoint does not disclose this management view to ToolHub or Knowledge.
+
+Local Windows regression `p25-working-state-ace1fc49c68b4f4cb59660a659eac3c6`
+passed 63 test records, vet/build, with five explicitly opt-in binary tests
+skipped. New authenticated HTTP submissions cover control and business routes,
+both deployment directions, changed-input refusal, client engine refusal and
+child inheritance. Subsequent `p25-worker-source-1cc8045977194d6ba13008ac506817cf`
+used the complete relocated Worker package and passed all three actual process/
+reply-loss scenarios plus recovery boundaries (20 integration pass records,
+zero skips). It additionally refuses resume after a previously allowed preview
+is invalidated by cancellation. Models, catalog/ToolHub routing and Storage in
+these tests are synthetic; PostgreSQL, Runtime, Worker and Node are real.
 
 The control-only `POST /v1/runs/{id}/resume-source-state` resolves exhausted
 source-state delivery retries. Under the run lock it requires the source engine,

@@ -6,6 +6,14 @@ import (
 )
 
 func (s *Server) workingStateRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/runs/{id}/source-recovery", wrap(func(w http.ResponseWriter, r *http.Request) error {
+		preview, err := readSourceRecovery(r.Context(), s.Store.DB, r.PathValue("id"))
+		if err != nil {
+			return err
+		}
+		jsonResponse(w, 200, preview)
+		return nil
+	}))
 	mux.HandleFunc("POST /v1/runs/{id}/resume-source-state", wrap(func(w http.ResponseWriter, r *http.Request) error {
 		if err := s.Store.resumeSourceState(r.Context(), r.PathValue("id")); err != nil {
 			return err

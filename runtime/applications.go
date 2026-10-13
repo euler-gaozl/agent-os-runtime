@@ -44,7 +44,7 @@ func (s *Server) applicationRoutes(mux *http.ServeMux) {
 			return e
 		}
 		defer tx.Rollback(r.Context())
-		id, e := insertRun(r.Context(), tx, app+":"+key, in.Task, snap, nil, nil)
+		id, e := s.Store.insertRoot(r.Context(), tx, app+":"+key, in.Task, snap, nil)
 		if e != nil {
 			return e
 		}

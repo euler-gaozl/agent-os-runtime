@@ -289,7 +289,7 @@ func (s *Server) runtimeRoutes(mux *http.ServeMux) {
 		if e = rows.Err(); e != nil {
 			return e
 		}
-		jsonResponse(w, 200, map[string]any{"instances": out})
+		jsonResponse(w, 200, map[string]any{"instances": out, "default_run_engine": s.Store.defaultRunEngine()})
 		return nil
 	}))
 	mux.HandleFunc("POST /v1/instances", wrap(func(w http.ResponseWriter, r *http.Request) error {

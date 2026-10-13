@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestSourceStateOperatorRecoveryBoundary(t *testing.T) {
-	for _, mode := range []string{"valid", "cancelled", "historical", "running", "unconfirmed", "later-model", "later-unconfirmed-state", "unknown-tool", "inflight-model", "worker", "toolhub"} {
+	for _, mode := range []string{"valid", "preview-then-cancel", "cancelled", "historical", "running", "unconfirmed", "later-model", "later-unconfirmed-state", "unknown-tool", "inflight-model", "worker", "toolhub"} {
 		t.Run(mode, func(t *testing.T) {
 			f := sourceSetup(t)
 			ctx := context.Background()
@@ -57,6 +58,28 @@ func TestSourceStateOperatorRecoveryBoundary(t *testing.T) {
 			caller := "control"
 			if mode == "worker" || mode == "toolhub" {
 				caller = mode
+			}
+			previewRequest, err := http.NewRequest("GET", f.server.URL+"/v1/runs/"+f.r.ID+"/source-recovery", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			previewRequest.Header.Set("Authorization", "Bearer "+testToken+caller)
+			previewResponse, err := f.server.Client().Do(previewRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var preview SourceRecovery
+			if caller == "control" {
+				err = json.NewDecoder(previewResponse.Body).Decode(&preview)
+				if err != nil || previewResponse.StatusCode != 200 || preview.RunID != f.r.ID || preview.Allowed != (mode == "valid" || mode == "preview-then-cancel") || preview.Reason == "" {
+					t.Fatal("wrong management preview", preview, err)
+				}
+			} else if previewResponse.StatusCode != 403 {
+				t.Fatal("management preview exposed to peer", caller)
+			}
+			previewResponse.Body.Close()
+			if mode == "preview-then-cancel" {
+				exec("UPDATE runs SET cancel_requested=true WHERE id=$1", f.r.ID)
 			}
 			req, err := http.NewRequest("POST", f.server.URL+"/v1/runs/"+f.r.ID+"/resume-source-state", nil)
 			if err != nil {

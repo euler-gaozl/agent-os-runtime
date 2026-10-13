@@ -17,6 +17,9 @@ func main() {
 		}
 		remote := servicehost.Client()
 		s := runtimeapi.NewStore(db, &remote, os.Getenv("STORAGE_URL"))
+		if err := s.ConfigureSubmissionEngine(os.Getenv("DEFAULT_RUN_ENGINE")); err != nil {
+			return nil, nil, err
+		}
 		server := &runtimeapi.Server{Store: s, Token: os.Getenv("SERVICE_TOKEN"), RegistryURL: os.Getenv("REGISTRY_URL"), KnowledgeURL: os.Getenv("KNOWLEDGE_URL"), SandboxURL: os.Getenv("SANDBOX_URL")}
 		return server.Handler(c), nil, nil
 	})

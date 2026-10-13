@@ -31,12 +31,25 @@ func EmitEvent(ctx context.Context, tx pgx.Tx, id, kind string, v any) error {
 	return e
 }
 func InsertRun(ctx context.Context, tx pgx.Tx, key, task string, snap Snapshot, parent *string, pinned []string) (string, error) {
+	return insertRunEngine(ctx, tx, key, task, snap, parent, pinned, EngineDSHEvidence)
+}
+
+// InsertRootRun selects an engine only at first acceptance. Deployment defaults
+// are deliberately absent from input_hash: a retry after an upgrade must return
+// the original run without changing its engine. Children always inherit theirs.
+func InsertRootRun(ctx context.Context, tx pgx.Tx, key, task string, snap Snapshot, pinned []string, engine string) (string, error) {
+	if engine != EngineDSHEvidence && engine != EngineDSHSource {
+		return "", errors.New("unsupported root submission engine")
+	}
+	return insertRunEngine(ctx, tx, key, task, snap, nil, pinned, engine)
+}
+
+func insertRunEngine(ctx context.Context, tx pgx.Tx, key, task string, snap Snapshot, parent *string, pinned []string, engine string) (string, error) {
 	constraints := append(append([]string{}, snap.Agent.Constraints...), pinned...)
 	id := ID()
 	inputHash := Hash(JSON([]any{task, snap, parent, pinned}))
 	state := RunState{Pinned: pinned, Messages: []Message{{Role: "user", Content: task}}}
 	var actual, oldHash string
-	engine := EngineDSHEvidence
 	if parent != nil {
 		if e := tx.QueryRow(ctx, "SELECT engine FROM runs WHERE id=$1", *parent).Scan(&engine); e != nil {
 			return "", e

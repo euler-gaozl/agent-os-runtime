@@ -86,44 +86,70 @@ func (s *Store) sourceState(ctx context.Context, inv Invocation) (json.RawMessag
 // Operator-triggered recovery is limited to the state protocol whose reads,
 // successes and rejections are atomically frozen. Never use this to guess an
 // unknown external tool outcome or to run a cancelled task again.
+type SourceRecovery struct {
+	RunID   string `json:"run_id"`
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason"`
+	method  string
+}
+
+// One read snapshot powers both the management preview and the locked action.
+// A preview is advisory; resume always locks and rechecks before requeueing.
+func readSourceRecovery(ctx context.Context, reader noteReader, id string) (SourceRecovery, error) {
+	v := SourceRecovery{RunID: id}
+	var status, engine, manifest string
+	var cancelled, unresolved bool
+	err := reader.QueryRow(ctx, `SELECT r.status,r.engine,r.cancel_requested,COALESCE(e.method,''),COALESCE(a.manifest_hash,''),
+ EXISTS(SELECT 1 FROM calls c WHERE c.run_id=r.id AND c.status IN('inflight','unknown'))
+ FROM runs r LEFT JOIN LATERAL (SELECT seq,method FROM harness_exchanges WHERE run_id=r.id ORDER BY seq DESC LIMIT 1) e ON true
+ LEFT JOIN harness_archives a ON a.run_id=r.id AND a.seq=e.seq WHERE r.id=$1`, id).
+		Scan(&status, &engine, &cancelled, &v.method, &manifest, &unresolved)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return v, stateError(404, "run not found")
+	}
+	if err != nil {
+		return v, err
+	}
+	switch {
+	case engine != EngineDSHSource:
+		v.Reason = "source_engine_required"
+	case cancelled:
+		v.Reason = "cancelled"
+	case status != "waiting_unknown":
+		v.Reason = "not_waiting"
+	case unresolved:
+		v.Reason = "unresolved_calls"
+	case v.method != "working_state_read" && v.method != "working_state_update":
+		v.Reason = "no_state_exchange"
+	case manifest == "":
+		v.Reason = "archive_unconfirmed"
+	default:
+		v.Reason, v.Allowed = "ready", true
+	}
+	return v, nil
+}
+
 func (s *Store) resumeSourceState(ctx context.Context, id string) error {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var status, engine string
-	var cancelled bool
-	if err = tx.QueryRow(ctx, "SELECT status,engine,cancel_requested FROM runs WHERE id=$1 FOR UPDATE", id).Scan(&status, &engine, &cancelled); err != nil {
+	var locked string
+	if err = tx.QueryRow(ctx, "SELECT id FROM runs WHERE id=$1 FOR UPDATE", id).Scan(&locked); err != nil {
 		return err
 	}
-	if status != "waiting_unknown" || engine != EngineDSHSource || cancelled {
-		return stateError(409, "only non-cancelled source-state recovery may resume")
-	}
-	var method, manifest string
-	err = tx.QueryRow(ctx, `SELECT e.method,COALESCE(a.manifest_hash,'') FROM harness_exchanges e
- LEFT JOIN harness_archives a ON a.run_id=e.run_id AND a.seq=e.seq
- WHERE e.run_id=$1 ORDER BY e.seq DESC LIMIT 1`, id).Scan(&method, &manifest)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return stateError(409, "source-state exchange required")
-	}
+	preview, err := readSourceRecovery(ctx, tx, id)
 	if err != nil {
 		return err
 	}
-	if (method != "working_state_read" && method != "working_state_update") || manifest == "" {
-		return stateError(409, "last exchange is not acknowledged source state")
-	}
-	var unresolved bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM calls WHERE run_id=$1 AND status IN('inflight','unknown'))", id).Scan(&unresolved); err != nil {
-		return err
-	}
-	if unresolved {
-		return stateError(409, "unresolved calls require reconciliation")
+	if !preview.Allowed {
+		return stateError(409, "source-state recovery refused: "+preview.Reason)
 	}
 	if _, err = tx.Exec(ctx, "UPDATE runs SET status='queued',owner='',lease_until=NULL,updated_at=now() WHERE id=$1", id); err != nil {
 		return err
 	}
-	if err = event(ctx, tx, id, "source_state_resumed", map[string]string{"method": method}); err != nil {
+	if err = event(ctx, tx, id, "source_state_resumed", map[string]string{"method": preview.method}); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
