@@ -57,3 +57,6 @@ var lockFamily = runstate.LockFamily
 const runColumns = runstate.RunColumns
 const EngineDSHEvidence = runstate.EngineDSHEvidence
 const EngineDSHSource = runstate.EngineDSHSource
+const EngineDSHResident = runstate.EngineDSHResident
+
+func isSourceEngine(engine string) bool { return runstate.IsSourceEngine(engine) }

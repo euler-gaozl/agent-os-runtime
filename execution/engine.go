@@ -15,6 +15,9 @@ import (
 const Protocol = "runtime-execution-v1"
 const EngineDSHEvidence = runstate.EngineDSHEvidence
 const EngineDSHSource = runstate.EngineDSHSource
+const EngineDSHResident = runstate.EngineDSHResident
+
+func IsSourceEngine(engine string) bool { return runstate.IsSourceEngine(engine) }
 
 type Run = contracts.Run
 type Message = contracts.Message
@@ -38,6 +41,28 @@ func New(db *pgxpool.Pool, archives ArtifactWriter) *Engine {
 // separate pinned source runner. New remains historical-engine-only.
 func NewSourceEnabled(db *pgxpool.Pool, archives ArtifactWriter) *Engine {
 	return &Engine{state: &runstate.Store{DB: db, Archives: archives, SourceEnabled: true}}
+}
+
+// NewSourceVersions admits only the explicitly verified artifact versions. The
+// historical NewSourceEnabled contract remains v1-only, even in this module.
+func NewSourceVersions(db *pgxpool.Pool, archives ArtifactWriter, engines []string) (*Engine, error) {
+	s := &runstate.Store{DB: db, Archives: archives}
+	seen := make(map[string]bool, len(engines))
+	for _, engine := range engines {
+		if seen[engine] {
+			return nil, errors.New("duplicate source engine")
+		}
+		seen[engine] = true
+		switch engine {
+		case EngineDSHSource:
+			s.SourceEnabled = true
+		case EngineDSHResident:
+			s.ResidentEnabled = true
+		default:
+			return nil, errors.New("unsupported source engine")
+		}
+	}
+	return &Engine{state: s}, nil
 }
 func Readiness(ctx context.Context, db *pgxpool.Pool) error {
 	if db == nil {

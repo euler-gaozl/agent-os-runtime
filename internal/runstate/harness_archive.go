@@ -13,9 +13,14 @@ import (
 // engine retains its wire behavior for unfinished historical runs.
 const EngineDSHEvidence = "dsh-0.2.0-rc.2-evidence-v1"
 const EngineDSHSource = "dsh-source-639ed015-state-v1"
+const EngineDSHResident = "dsh-source-639ed015-resident-v2"
+
+func IsSourceEngine(engine string) bool {
+	return engine == EngineDSHSource || engine == EngineDSHResident
+}
 
 func hasIncrementalEvidence(engine string) bool {
-	return engine == EngineDSHEvidence || engine == EngineDSHSource
+	return engine == EngineDSHEvidence || IsSourceEngine(engine)
 }
 
 const archiveSegmentBytes = 1 << 20

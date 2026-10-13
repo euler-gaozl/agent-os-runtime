@@ -1,6 +1,31 @@
 # Agent OS Runtime
 
-Independent owner of execution state, run leases, model/tool receipts, DSH exchange retention and Agent notes. Worker is a separate process/repository and consumes the fixed `execution` module. Go 1.27.2; fixed SDK and committed vendor; no sibling source replacement. No new Runtime release is selected on the live Windows installation yet.
+Independent owner of execution state, run leases, model/tool receipts, DSH exchange retention and Agent notes. Worker is a separate process/repository and consumes the fixed `execution` module. Go 1.27.2; fixed SDK and committed vendor; no sibling source replacement. Actual Windows activation is recorded by the integration repository; building a later candidate here does not change the deployed release.
+
+## Resident-v2 version selection candidate
+
+The additive `execution.NewSourceVersions` constructor accepts only explicitly
+configured state-v1/resident-v2 source engines. `New` remains historical-only;
+`NewSourceEnabled` remains state-v1-only. Callers must verify each exact pinned
+artifact before enabling its claims. No slice supplied by the caller is retained.
+Unknown and duplicate versions fail. The source protocol, archive requirements,
+state responses, receipt metadata, cancellation and operator recovery support
+both explicit source versions. Exchange refuses a caller/DB engine mismatch
+before any intent or effect, and checks again under the run row lock.
+
+Deployment configuration may select resident-v2 for new roots, but this is not
+permission to activate it: matching Worker pins, package compatibility and
+rollback checks are required. Idempotent retries and children preserve the
+original accepted engine. No migration or production-default change is included.
+
+Local evidence `p25-resident-runtime-75cd1e2ff8a64746b2cb17ba67b59999` passed
+79 records (including subtests), zero test skips, vet and builds using restricted
+disposable PostgreSQL and Runtime HTTP. Tests cover both source versions' state,
+archive/frozen-reply/recovery/cancellation boundaries, explicit claim combinations,
+engine mismatch and public root/child version retention. The archive/effects are
+fixtures. Independent read-only review matched all 11 source hashes and found
+no blocker; it did not run tests. Worker/Node process acceptance and production
+release remain separate. No paid model calls or GitHub Actions ran.
 
 ## Boundaries
 

@@ -35,7 +35,7 @@ func (s *Store) sourceState(ctx context.Context, inv Invocation) (json.RawMessag
 	if err != nil {
 		return nil, err
 	}
-	if run.Engine != EngineDSHSource {
+	if !isSourceEngine(run.Engine) {
 		return nil, stateError(400, "working-state bridge requires the source engine")
 	}
 	var method, hash, manifest string
@@ -111,7 +111,7 @@ func readSourceRecovery(ctx context.Context, reader noteReader, id string) (Sour
 		return v, err
 	}
 	switch {
-	case engine != EngineDSHSource:
+	case !isSourceEngine(engine):
 		v.Reason = "source_engine_required"
 	case cancelled:
 		v.Reason = "cancelled"

@@ -12,9 +12,10 @@ import (
 
 // Store is internal to this owner module. Its database never crosses the public execution facade.
 type Store struct {
-	DB            *pgxpool.Pool
-	Archives      ArtifactWriter
-	SourceEnabled bool
+	DB              *pgxpool.Pool
+	Archives        ArtifactWriter
+	SourceEnabled   bool
+	ResidentEnabled bool
 }
 type ArtifactWriter interface {
 	PutArtifact(context.Context, []byte, string, string) (string, error)
@@ -38,7 +39,7 @@ func InsertRun(ctx context.Context, tx pgx.Tx, key, task string, snap Snapshot, 
 // are deliberately absent from input_hash: a retry after an upgrade must return
 // the original run without changing its engine. Children always inherit theirs.
 func InsertRootRun(ctx context.Context, tx pgx.Tx, key, task string, snap Snapshot, pinned []string, engine string) (string, error) {
-	if engine != EngineDSHEvidence && engine != EngineDSHSource {
+	if engine != EngineDSHEvidence && !IsSourceEngine(engine) {
 		return "", errors.New("unsupported root submission engine")
 	}
 	return insertRunEngine(ctx, tx, key, task, snap, nil, pinned, engine)
@@ -125,6 +126,9 @@ func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration) (R
 	if s.SourceEnabled {
 		engines = append(engines, EngineDSHSource)
 	}
+	if s.ResidentEnabled {
+		engines = append(engines, EngineDSHResident)
+	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
 		return Run{}, e
@@ -140,14 +144,21 @@ func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration) (R
 	}
 	return r, tx.Commit(ctx)
 }
-func LockRun(ctx context.Context, tx pgx.Tx, id, owner string, fence int64, allowCancel bool) error {
+func LockRun(ctx context.Context, tx pgx.Tx, id, owner string, fence int64, allowCancel bool, expectedEngine ...string) error {
+	if len(expectedEngine) > 1 {
+		return errors.New("one expected execution engine required")
+	}
 	var valid bool
-	e := tx.QueryRow(ctx, "SELECT owner=$2 AND fence=$3 AND status='running' AND lease_until>clock_timestamp() AND ($4 OR NOT cancel_requested) FROM runs WHERE id=$1 FOR UPDATE", id, owner, fence, allowCancel).Scan(&valid)
+	var engine string
+	e := tx.QueryRow(ctx, "SELECT owner=$2 AND fence=$3 AND status='running' AND lease_until>clock_timestamp() AND ($4 OR NOT cancel_requested),engine FROM runs WHERE id=$1 FOR UPDATE", id, owner, fence, allowCancel).Scan(&valid, &engine)
 	if e != nil {
 		return e
 	}
 	if !valid {
 		return ErrFence
+	}
+	if len(expectedEngine) == 1 && engine != expectedEngine[0] {
+		return errors.New("execution engine differs from the locked run")
 	}
 	return nil
 }
@@ -203,10 +214,10 @@ func (s *Store) Cancel(ctx context.Context, id string) error {
 	// cancellation never retries that operation. Unknown external effects retain
 	// their existing reconciliation requirement.
 	_, e = tx.Exec(ctx, `UPDATE runs r SET cancel_requested=true,status=CASE WHEN status IN('queued','waiting_children','failed')
- OR (status='waiting_unknown' AND engine=$2
+ OR (status='waiting_unknown' AND engine=ANY($2)
  AND (SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1) IN('working_state_read','working_state_update')
  AND NOT EXISTS(SELECT 1 FROM calls c WHERE c.run_id=r.id AND c.status IN('inflight','unknown')))
- THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, EngineDSHSource)
+ THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, []string{EngineDSHSource, EngineDSHResident})
 	if e != nil {
 		return e
 	}

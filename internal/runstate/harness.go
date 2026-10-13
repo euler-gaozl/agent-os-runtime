@@ -44,7 +44,7 @@ func canonicalHash(b []byte) string {
 }
 
 func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) (any, bool, error) {
-	if (f.Method == "checkpoint" || f.Method == "working_state_read" || f.Method == "working_state_update") && r.Engine != EngineDSHSource {
+	if (f.Method == "checkpoint" || f.Method == "working_state_read" || f.Method == "working_state_update") && !IsSourceEngine(r.Engine) {
 		return nil, false, errors.New("source bridge method requires the source engine")
 	}
 	fresh, e := s.Run(ctx, r.ID)
@@ -54,6 +54,9 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	if fresh.Owner != r.Owner || fresh.Fence != r.Fence || fresh.CancelRequested {
 		return nil, false, ErrFence
 	}
+	if fresh.Engine != r.Engine {
+		return nil, false, errors.New("execution engine differs from the immutable run")
+	}
 	r.RuleRevision = fresh.RuleRevision
 	r.Constraints = fresh.Constraints
 	tx, e := s.DB.Begin(ctx)
@@ -61,7 +64,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		return nil, false, e
 	}
 	defer tx.Rollback(ctx)
-	if e = LockRun(ctx, tx, r.ID, r.Owner, r.Fence, false); e != nil {
+	if e = LockRun(ctx, tx, r.ID, r.Owner, r.Fence, false, r.Engine); e != nil {
 		return nil, false, e
 	}
 	var hash, method string
@@ -274,7 +277,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 			}
 			value = string(JSON(map[string]any{"artifact_hash": hash, "bytes": len(raw), "preview": truncateUTF8(string(raw), 1800), "note": "Full result retained; use artifact_read."}))
 		}
-		if r.Engine == EngineDSHSource {
+		if IsSourceEngine(r.Engine) {
 			// A skipped plan has no source receipt. Never fabricate a usable ID.
 			var committed bool
 			if e = s.DB.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM calls WHERE id=$1 AND run_id=$2 AND kind='tool' AND status='completed')", op, r.ID).Scan(&committed); e != nil {
