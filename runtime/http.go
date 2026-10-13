@@ -28,6 +28,7 @@ func (s *Server) Handler(c servicehttp.Config) http.Handler {
 		s.documentRoutes(m, "/v1")
 		s.toolRoutes(m)
 		s.applicationRoutes(m)
+		s.appEvidenceRoutes(m)
 		s.sandboxAuthorizationRoutes(m)
 	})
 }

@@ -2,6 +2,26 @@
 
 Independent owner of execution state, run leases, model/tool receipts, DSH exchange retention and Agent notes. Worker is a separate process/repository and consumes the fixed `execution` module. Go 1.27.2; fixed SDK and committed vendor; no sibling source replacement. Actual Windows activation is recorded by the integration repository; building a later candidate here does not change the deployed release.
 
+## App-scoped retained document reads
+
+`GET /v1/apps/{app}/runs/{id}/evidence` lists successful `document_read`
+receipts from that app task and its descendants (at most 128 visible tasks).
+It returns bounded previews, document identifiers and original read ranges;
+default page size is 20, maximum 30. `document_id` filters an individual source,
+and the seek cursor is bound to the app, root task and document filter.
+`.../evidence/record?operation_id=...` reads only retained document text, with
+Unicode pagination (maximum 8192 characters) and a pinned response version.
+No model request, arbitrary tool payload or document metadata is exposed.
+Other tasks/apps and unresolved calls are excluded. The existing futures peer
+can use only its app path; it still cannot use management receipt APIs.
+
+These are the pieces the task actually read, not a fresh Knowledge lookup or
+a claim that the complete source was read or independently verified. External
+capture tools do not yet appear here. The API is additive and needs no schema
+migration; older consumers continue unchanged. Readiness does not declare
+research quality, and future consumers must show unavailable rather than an
+empty evidence list when the API has not been installed.
+
 ## Bounded management receipt candidate
 
 The control-only `GET /v1/runs/{id}/calls/page` returns newest-first summaries
