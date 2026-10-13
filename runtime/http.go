@@ -24,6 +24,7 @@ func (s *Server) Handler(c servicehttp.Config) http.Handler {
 	return servicehttp.New(c, s.Store.DB.Ping, func(m *http.ServeMux) {
 		s.runtimeRoutes(m)
 		s.workingStateRoutes(m)
+		s.callReadRoutes(m)
 		s.documentRoutes(m, "/v1")
 		s.toolRoutes(m)
 		s.applicationRoutes(m)

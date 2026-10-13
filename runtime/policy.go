@@ -8,6 +8,9 @@ func Authorize(caller, method, path string) bool {
 	if path == "/v1/source-state" {
 		return caller == "worker" && method == "POST"
 	}
+	if strings.HasSuffix(path, "/calls/page") || strings.HasSuffix(path, "/calls/record") {
+		return caller == "control" && method == "GET" && strings.HasPrefix(path, "/v1/runs/")
+	}
 	// This derived ledger is not exposed through generic run-prefix grants.
 	// Worker state operations use the separate fenced source-engine route.
 	if strings.HasSuffix(path, "/working-state") || strings.HasSuffix(path, "/source-recovery") {

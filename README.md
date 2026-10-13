@@ -2,6 +2,36 @@
 
 Independent owner of execution state, run leases, model/tool receipts, DSH exchange retention and Agent notes. Worker is a separate process/repository and consumes the fixed `execution` module. Go 1.27.2; fixed SDK and committed vendor; no sibling source replacement. Actual Windows activation is recorded by the integration repository; building a later candidate here does not change the deployed release.
 
+## Bounded management receipt candidate
+
+The control-only `GET /v1/runs/{id}/calls/page` returns newest-first summaries
+(default 25, maximum 50), with a `(created_at,id)` seek cursor bound to the run
+and `all`/`unresolved` filter. Summaries exclude request/response bodies; unresolved
+calls are queried independently of the history page. This is a live listing,
+not a database snapshot: refresh to observe new or late-committing receipts.
+
+`GET /v1/runs/{id}/calls/record` takes `operation_id`, `field` (request, response,
+error), `offset`, `limit` and `version`. It returns at most 16,384 Unicode code
+points (default 8,192). Subsequent segments require the first segment's content
+version; changed text returns 409. SQL NULL differs from saved JSON null. The
+version hashes PostgreSQL's persisted text representation, not provider wire
+bytes or the working-state canonical JSON hash. Database conversion/hash cost
+is proportional to one field; this does not establish a DB memory hard bound.
+The historical complete `Calls` API and Worker execution module are unchanged.
+
+The owner migration adds normal and unresolved seek indexes transactionally.
+Back up and apply the owner migration before activation; install this Runtime
+before a Console requiring `call-receipts-v1`, and roll that Console back first.
+Windows release metadata guards this capability and the bound actual local
+target. Formal activation and Linux deployment remain separate acceptance steps.
+
+Local evidence `call-reads-3f565d3b33f045b38d3881b137d5452c` records 22 passing
+tests/subtests, no skips, vet and independent builds against restricted disposable
+PostgreSQL: timestamp ties, foreign cursors, off-page unresolved calls, Unicode
+reassembly, version conflicts, null semantics, HTTP roles and related migration,
+note and working-state regression. Initial substring parameter typing failure
+was retained and fixed. No paid provider or Actions ran.
+
 ## Resident-v2 version selection candidate
 
 The additive `execution.NewSourceVersions` constructor accepts only explicitly

@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS app_runs(run_id text PRIMARY KEY REFERENCES runs(id),
 CREATE INDEX IF NOT EXISTS app_runs_listing ON app_runs(app,created_at DESC);
 INSERT INTO app_runs(run_id,app,metadata,created_at) SELECT run_id,'futures',jsonb_build_object('commodity',commodity),created_at FROM business_runs ON CONFLICT DO NOTHING;
 CREATE INDEX IF NOT EXISTS calls_run_kind ON calls(run_id,kind);
+CREATE INDEX IF NOT EXISTS calls_run_page ON calls(run_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS calls_unresolved_page ON calls(run_id,created_at DESC,id DESC) WHERE status IN ('unknown','inflight');
 CREATE INDEX IF NOT EXISTS model_attempts_call ON model_attempts(call_id);
 -- Pending batches are a durable outbox. Only after Storage acknowledges the
 -- immutable segments/manifest is the temporary batch released.
