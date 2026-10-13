@@ -14,7 +14,10 @@ var migrationSQL string
 //go:embed notes.sql
 var notesSQL string
 
-var runtimeTables = []string{"documents", "runs", "events", "calls", "model_attempts", "instances", "business_runs", "harness_exchanges", "app_runs", "harness_archives", "note_roots", "note_versions", "note_admin_receipts", "note_audits"}
+//go:embed working_state.sql
+var workingStateSQL string
+
+var runtimeTables = []string{"documents", "runs", "events", "calls", "model_attempts", "instances", "business_runs", "harness_exchanges", "app_runs", "harness_archives", "note_roots", "note_versions", "note_admin_receipts", "note_audits", "run_working_states"}
 
 // Migrate owns this domain only. Both roles already exist; DDL and grants
 // commit atomically. It never moves legacy data or silently revokes old grants.
@@ -42,7 +45,7 @@ func Migrate(ctx context.Context, db *pgxpool.Pool, runtimeRole, workerRole stri
 			return errors.New("application role is not provisioned")
 		}
 	}
-	for _, sql := range []string{migrationSQL, notesSQL} {
+	for _, sql := range []string{migrationSQL, notesSQL, workingStateSQL} {
 		if _, e = tx.Exec(ctx, sql); e != nil {
 			return e
 		}
@@ -57,7 +60,11 @@ func Migrate(ctx context.Context, db *pgxpool.Pool, runtimeRole, workerRole stri
 		}
 	}
 	for _, table := range runtimeTables {
-		if e = grant("SELECT,INSERT,UPDATE,DELETE", "TABLE", table, runtimeRole); e != nil {
+		privileges := "SELECT,INSERT,UPDATE,DELETE"
+		if table == "run_working_states" {
+			privileges = "SELECT,INSERT"
+		}
+		if e = grant(privileges, "TABLE", table, runtimeRole); e != nil {
 			return e
 		}
 	}

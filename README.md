@@ -19,11 +19,70 @@ Runtime notes, child creation, tool receipts and events still commit in one tran
 
 Provision distinct existing application roles, then run the migration as an administrator using `MIGRATION_DATABASE_URL` and `migrate --role <runtime-role> --worker-role <worker-role>`. Runtime never runs DDL on startup. Migration retains existing `public` table locations and lock 8843921; schema, note triggers, table grants and sequence grants commit together, with bounded lock/statement deadlines. Existing data and unrelated tables are retained; there is no automatic down migration or legacy-grant revocation.
 
-Fresh Runtime roles receive DML only on the 14 owned tables and the two event/audit sequences. Fresh Worker roles receive SELECT/UPDATE on runs; SELECT/INSERT/UPDATE on calls, model_attempts, harness_exchanges and harness_archives; SELECT/INSERT on events and sequence usage. Workers do not write notes, submit child runs or reconcile tools directly.
+Fresh Runtime roles receive DML on the original 14 owned tables, SELECT/INSERT only on the new `run_working_states` ledger, and the two event/audit sequences. Fresh Worker roles receive SELECT/UPDATE on runs; SELECT/INSERT/UPDATE on calls, model_attempts, harness_exchanges and harness_archives; SELECT/INSERT on events and sequence usage. Workers do not write notes, submit child runs or reconcile tools directly, and have no access to the working-state ledger.
 
 **Rollback permission condition:** the old monorepo Worker readiness probe reads all Runtime tables, including documents, note lifecycle tables, instances, business_runs and app_runs. Retain those historical SELECT grants while that executable is a rollback target. The fresh minimum Worker account is for the new executable; it is not proof that the old binary can start. The existing Windows account's broader grants are retained, not declared retired.
 
 Local readiness checks owned schema/permissions. It does not prove a downstream/model provider is available. Each process uses a bounded pool (default 3, minimum 2) and HTTP concurrency. This release does not establish final-scale capacity or cross-host HA.
+
+## Structured working state candidate
+
+`runtime/working_state.go` adds a bounded, versioned ledger for derived questions,
+observations, plans, third-party forecasts, conflicts and next steps. Original task
+and current user constraints remain authoritative in `runs`, read in one SQL
+snapshot alongside the ledger; they cannot be supplied by a working-set update.
+The ledger is separate from `runs.state`, which historical Worker checkpoints
+replace in full. A later constraint revision marks a prior working set stale.
+
+The internal write primitive requires a live run lease, owner/fence and current
+rule revision. Replacements use expected-revision CAS and a run-scoped operation
+ID. State, stable response and metadata-only audit event commit together. A retry
+returns that operation's original receipt even if newer state revisions exist;
+a changed payload under the same ID is rejected. Receipt reads remain possible
+after cancellation or takeover, which does not grant any further write rights.
+Requests reject unknown fields, duplicate JSON keys, invalid kinds and oversized
+working sets (32 KiB including the reason, bounded lists and text). The hash uses
+the validated typed value, excluding replaceable owner/fence identity.
+
+Each observation references 1–8 committed tool receipts from the same run. The
+ledger retains their canonical response hashes. This proves retrievability, not
+that a tool succeeded or a statement is verified; the three observation kinds
+are the agent's classifications. No cross-domain SQL or new automatic deletion
+is introduced. All historical revisions remain queryable; the latest read is
+bounded, but this does not bound total disk history or DSH memory.
+
+Only the authenticated `control` identity can GET `/v1/runs/{id}/working-state`.
+Optional `revision` selects an exact historical revision; `operation_id` instead
+selects the committed response. Generic run-read privileges for ToolHub and
+Knowledge explicitly do not include this route. There is no public mutation
+route, new builtin tool, or current-engine integration. The internal primitive
+is not an enabled Agent capability yet. Publishing it requires the source engine,
+authorization/tool binding, versioned context injection and checkpoint acceptance.
+Manual edits also require a future plan-invalidation protocol before exposure.
+
+Migration adds one append-only application table, and readiness requires it.
+Candidate release metadata uses the new working-state HTTP/data identifiers;
+the existing execution facade and engine/tool sets are unchanged. Run the Owner
+migration and coordinate integration release contracts before any activation.
+No deployed version, integration source lock or active task has been switched.
+
+Initial disposable Windows PostgreSQL run `p25-working-state-b7fca4e46ce04e9b9fcc943266b360a4`
+passed 40 tests, vet and builds; the two opt-in executable handoff/long-history
+tests were explicitly skipped. Independent review then found duplicate JSON
+keys could differ between struct validation and map hashing; its failing
+reproducer is retained in that directory. After the local parser/hash fix,
+`p25-working-state-1f39c61b846f454697d7b6b2e98c0ffe` passed 10 focused state/migration
+tests with zero skips, vet and builds. Coverage includes actual concurrent CAS,
+receipt replay, stale owner/rule rejection, cancellation lookup, cross-run and
+uncommitted source refusal, event-failure rollback, restricted-role denial,
+unchanged historical Save behavior and authenticated read isolation. PostgreSQL
+fixtures were stopped; these runs used no provider or live service deployment.
+
+Final source validation batches receipt lookups in one bounded SQL query instead
+of up to 256 round trips. `p25-working-state-2a0e4c65288e4b0897fac9830d551760`
+passed the same 10 tests with zero skips, vet and builds, including multiple
+source hashes/order and refusal of mixed valid/foreign references. Earlier
+reports remain historical evidence; none establishes measured production latency.
 
 ## Verification status
 
