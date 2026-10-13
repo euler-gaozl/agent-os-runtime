@@ -6,6 +6,18 @@ import (
 )
 
 func (s *Server) workingStateRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/source-state", wrap(func(w http.ResponseWriter, r *http.Request) error {
+		var inv Invocation
+		if err := decode(w, r, &inv); err != nil {
+			return err
+		}
+		response, err := s.Store.sourceState(r.Context(), inv)
+		if err != nil {
+			return err
+		}
+		jsonResponse(w, 200, response)
+		return nil
+	}))
 	mux.HandleFunc("GET /v1/runs/{id}/working-state", wrap(func(w http.ResponseWriter, r *http.Request) error {
 		if operation := r.URL.Query().Get("operation_id"); operation != "" {
 			if len(operation) > 240 || r.URL.Query().Has("revision") {

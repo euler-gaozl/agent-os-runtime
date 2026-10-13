@@ -5,12 +5,13 @@
   "migration_owner": "runtime",
   "backward_compatible": true,
   "contract": {
-    "http": "agentos-http-v0.7-working-state-read",
+    "http": "agentos-http-v0.7-source-state-v1",
     "data": "execution-v0.7-working-state",
     "tools": ["knowledge_search","note_save","artifact_read","spawn_agent","sandbox_exec","document_read","run_recall","note_revise","note_retire"],
     "engines": []
   },
   "execution_protocol": "runtime-execution-v1",
-  "activation_condition": "Candidate only: run the additive working-state migration and coordinate integration release contracts before activation. No current engine consumes or writes the new ledger.",
+  "source_engine_candidate": "dsh-source-639ed015-state-v1",
+  "activation_condition": "Candidate only: requires additive working-state migration, pinned source runner and Worker integration with coordinated release contracts. No submission route or deployed Worker selects the source engine yet. Default execution.New claims historical engines only.",
   "rollback_permission_condition": "Keep legacy Runtime-table SELECT grants for the old monorepo Worker readiness probe; fresh minimum roles are new-binary-only."
 }

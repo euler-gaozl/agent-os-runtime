@@ -15,6 +15,12 @@ type Effects interface {
 	CompleteModel(context.Context, Run, string, []Message, []Tool) (Message, error)
 	InvokeTool(context.Context, Invocation) ([]byte, error)
 }
+
+// SourceEffects transports the new engine's fenced state operations to Runtime.
+// No business SQL or working-state table access is granted to Worker.
+type SourceEffects interface {
+	SourceState(context.Context, Invocation) ([]byte, error)
+}
 type Frame struct {
 	ID         int             `json:"id"`
 	Method     string          `json:"method"`
@@ -38,6 +44,9 @@ func canonicalHash(b []byte) string {
 }
 
 func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) (any, bool, error) {
+	if (f.Method == "checkpoint" || f.Method == "working_state_read" || f.Method == "working_state_update") && r.Engine != EngineDSHSource {
+		return nil, false, errors.New("source bridge method requires the source engine")
+	}
 	fresh, e := s.Run(ctx, r.ID)
 	if e != nil {
 		return nil, false, e
@@ -67,7 +76,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 			return nil, false, errors.New("DSH replay diverged; refusing to repeat effects")
 		}
 		if response != nil {
-			if r.Engine == EngineDSHEvidence {
+			if hasIncrementalEvidence(r.Engine) {
 				if e = tx.QueryRow(ctx, "SELECT manifest_hash FROM harness_archives WHERE run_id=$1 AND seq=$2 AND manifest_hash<>''", r.ID, f.ID).Scan(&r.State.HarnessArtifact); e != nil {
 					return nil, false, e
 				}
@@ -109,6 +118,10 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		}
 	} else {
 		revision = r.RuleRevision
+		if f.Method == "working_state_update" {
+			// Pin the originating model's rules, not refreshed rules at dispatch.
+			revision = r.State.PlanRevision
+		}
 		request = f.Params
 		if f.Method == "model" {
 			var m ModelInput
@@ -154,7 +167,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		if e != nil {
 			return nil, false, e
 		}
-		if r.Engine == EngineDSHEvidence {
+		if hasIncrementalEvidence(r.Engine) {
 			if e = stageHarnessArchive(ctx, tx, *r, f); e != nil {
 				return nil, false, e
 			}
@@ -164,7 +177,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		return nil, false, e
 	}
 	// Preserve newly emitted events before another provider request or tool effect.
-	if r.Engine == EngineDSHEvidence {
+	if hasIncrementalEvidence(r.Engine) {
 		hash, err := s.commitHarnessArchive(ctx, *r, f.ID)
 		if err != nil {
 			return nil, false, err
@@ -181,6 +194,23 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	var value any
 	done := false
 	switch f.Method {
+	case "checkpoint":
+		value = map[string]any{"persisted": true, "manifest_hash": r.State.HarnessArtifact}
+	case "working_state_read", "working_state_update":
+		source, ok := effects.(SourceEffects)
+		if !ok {
+			return nil, false, errors.New("source state transport unavailable")
+		}
+		// Preserve the plan revision for a new update. Runtime first recovers a
+		// matching committed receipt, then checks current rules only for new writes.
+		raw, err := source.SourceState(ctx, Invocation{RunID: r.ID, Owner: r.Owner, Fence: r.Fence, RuleRevision: revision,
+			OperationID: fmt.Sprintf("%s/working-state/%d", r.ID, f.ID), Name: f.Method, Arguments: request})
+		if err != nil {
+			return nil, false, err
+		}
+		if e = json.Unmarshal(raw, &value); e != nil {
+			return nil, false, e
+		}
 	case "failed":
 		return nil, false, fmt.Errorf("DSH failed: %s", f.Params)
 	case "model":
@@ -244,6 +274,14 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 			}
 			value = string(JSON(map[string]any{"artifact_hash": hash, "bytes": len(raw), "preview": truncateUTF8(string(raw), 1800), "note": "Full result retained; use artifact_read."}))
 		}
+		if r.Engine == EngineDSHSource {
+			// A skipped plan has no source receipt. Never fabricate a usable ID.
+			var committed bool
+			if e = s.DB.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM calls WHERE id=$1 AND run_id=$2 AND kind='tool' AND status='completed')", op, r.ID).Scan(&committed); e != nil {
+				return nil, false, e
+			}
+			value = string(JSON(map[string]any{"result": value, "receipt": map[string]any{"operation_id": op, "committed": committed}}))
+		}
 	case "finish":
 		if r.State.PlanRevision != r.RuleRevision {
 			value = map[string]string{"continue": "User constraints changed. Reconsider the answer under the current platform constraints."}
@@ -269,8 +307,20 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	if e = LockRun(ctx, tx, r.ID, r.Owner, r.Fence, false); e != nil {
 		return nil, false, e
 	}
-	if _, e = tx.Exec(ctx, "UPDATE harness_exchanges SET response=$3 WHERE run_id=$1 AND seq=$2", r.ID, f.ID, JSON(value)); e != nil {
-		return nil, false, e
+	if f.Method == "working_state_read" || f.Method == "working_state_update" {
+		// Runtime is the sole response writer for source-state exchanges. Never
+		// replace its frozen read/rejection/receipt with a transport-decoded value.
+		var retained []byte
+		if e = tx.QueryRow(ctx, "SELECT response FROM harness_exchanges WHERE run_id=$1 AND seq=$2", r.ID, f.ID).Scan(&retained); e != nil {
+			return nil, false, e
+		}
+		if retained == nil || canonicalHash(retained) != canonicalHash(JSON(value)) {
+			return nil, false, errors.New("source-state response not committed or transport mismatch")
+		}
+	} else {
+		if _, e = tx.Exec(ctx, "UPDATE harness_exchanges SET response=$3 WHERE run_id=$1 AND seq=$2", r.ID, f.ID, JSON(value)); e != nil {
+			return nil, false, e
+		}
 	}
 	if e = tx.Commit(ctx); e != nil {
 		return nil, false, e

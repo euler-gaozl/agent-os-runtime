@@ -12,6 +12,12 @@ import (
 // Same upstream kernel; different, pinned platform evidence protocol. The old
 // engine retains its wire behavior for unfinished historical runs.
 const EngineDSHEvidence = "dsh-0.2.0-rc.2-evidence-v1"
+const EngineDSHSource = "dsh-source-639ed015-state-v1"
+
+func hasIncrementalEvidence(engine string) bool {
+	return engine == EngineDSHEvidence || engine == EngineDSHSource
+}
+
 const archiveSegmentBytes = 1 << 20
 const archiveBatchBytes = 16 << 20
 

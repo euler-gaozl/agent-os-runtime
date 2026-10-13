@@ -7,7 +7,7 @@ Independent owner of execution state, run leases, model/tool receipts, DSH excha
 - `runtime`: submission/management API, current ToolHub governance checks, local and external effect receipts, note lifecycle, event delivery, and the sole schema migration.
 - `internal/runstate`: execution transactions and archive acknowledgement. It has no HTTP server, model transport, tool implementation or schema migration.
 - `execution`: the `runtime-execution-v1` Worker persistence facade. It exposes no database handle, transaction, raw SQL, migration or local-tool invocation. The dependency closure excludes `runtime`.
-- Worker owns polling, Node pipe supervision, model HTTP, ToolHub HTTP and historical-loop compatibility. All three existing engine identifiers remain supported. DSH source/storage changes are a later separately validated version; this extraction does not implement them.
+- Worker owns polling, Node pipe supervision, model HTTP, ToolHub HTTP and historical-loop compatibility. All three existing engine identifiers remain supported. The source-engine bridge described below is an additional candidate; it is not selected by the default Worker facade or live deployment.
 
 `Exchange` retains the existing replay protocol: canonical intent and first event batch commit together, immutable Storage bytes are acknowledged under a valid fence, then model/ToolHub callbacks run outside the transaction. A failed archive barrier stops external work. Completed receipts replay without repeating effects. A response committed before a failed run checkpoint is recovered on replay. `CompleteModel` must finish the model ledger transaction before returning success; it receives the adjusted run/token cap explicitly.
 
@@ -40,7 +40,7 @@ ID. State, stable response and metadata-only audit event commit together. A retr
 returns that operation's original receipt even if newer state revisions exist;
 a changed payload under the same ID is rejected. Receipt reads remain possible
 after cancellation or takeover, which does not grant any further write rights.
-Requests reject unknown fields, duplicate JSON keys, invalid kinds and oversized
+The internal primitive rejects unknown fields, duplicate JSON keys, invalid kinds and oversized
 working sets (32 KiB including the reason, bounded lists and text). The hash uses
 the validated typed value, excluding replaceable owner/fence identity.
 
@@ -54,15 +54,15 @@ bounded, but this does not bound total disk history or DSH memory.
 Only the authenticated `control` identity can GET `/v1/runs/{id}/working-state`.
 Optional `revision` selects an exact historical revision; `operation_id` instead
 selects the committed response. Generic run-read privileges for ToolHub and
-Knowledge explicitly do not include this route. There is no public mutation
-route, new builtin tool, or current-engine integration. The internal primitive
-is not an enabled Agent capability yet. Publishing it requires the source engine,
-authorization/tool binding, versioned context injection and checkpoint acceptance.
+Knowledge explicitly do not include this route. There is no control mutation
+route or historical-engine integration. The Worker-only candidate transport below
+does not by itself enable an Agent capability. Activation requires the pinned
+source runner, tool registration, versioned context projection and checkpoint acceptance.
 Manual edits also require a future plan-invalidation protocol before exposure.
 
 Migration adds one append-only application table, and readiness requires it.
 Candidate release metadata uses the new working-state HTTP/data identifiers;
-the existing execution facade and engine/tool sets are unchanged. Run the Owner
+the historical execution facade and engine/tool sets retain their behavior. Run the Owner
 migration and coordinate integration release contracts before any activation.
 No deployed version, integration source lock or active task has been switched.
 
@@ -83,6 +83,61 @@ of up to 256 round trips. `p25-working-state-2a0e4c65288e4b0897fac9830d551760`
 passed the same 10 tests with zero skips, vet and builds, including multiple
 source hashes/order and refusal of mixed valid/foreign references. Earlier
 reports remain historical evidence; none establishes measured production latency.
+
+## Source engine bridge candidate
+
+`dsh-source-639ed015-state-v1` adds incremental-evidence `checkpoint`,
+`working_state_read` and `working_state_update` frames. Historical engines reject
+these methods and retain their model/tool response format. `execution.New` only
+claims the three historical engines; `NewSourceEnabled` explicitly admits the new
+one after its caller verifies a separately pinned runner. No public submission
+option, Worker runner selection or deployment activation is implemented here yet.
+
+The Worker transports state invocations through `POST /v1/source-state` using its
+service identity. Runtime checks the live lease/fence, source engine, scoped
+numeric operation ID, matching staged intent and confirmed immutable archive.
+An update intent pins the originating model's rule revision. A caller cannot
+reauthorize an old plan by supplying newer rules. Worker still has no access to
+`run_working_states`; the new execution facade exposes no state SQL or business
+mutation implementation.
+
+Runtime is the sole writer of each source-state Exchange response. A successful
+state revision, metadata-only event and response commit in one transaction. A
+definite CAS/schema/source rejection instead commits that negative response;
+a read commits its exact snapshot. HTTP reply loss cannot refresh the read or
+turn a previously rejected write into success when the state later changes.
+Database failures roll everything back. The outer Exchange checks the retained
+response against transport bytes and then saves its run checkpoint; it never
+overwrites Runtime's response. A subsequent valid owner can replay a completed
+response without applying the state effect again. Cancelled or expired owners
+cannot use this write path; the control receipt API still reads successful
+committed state receipts, not every negative/read bridge response.
+
+New-engine ordinary tool results include the platform-derived operation ID and
+a `committed` marker. Skipped old plans have no committed source receipt. Large
+results retain the existing artifact reference plus the true receipt; retention
+does not imply truth, tool success or business verification. A checkpoint only
+acknowledges the existing immutable event manifest, not native Session restoration
+or a bound on in-memory DSH history.
+
+Local evidence `p25-working-state-f5cb819206ed4b3caf269903b8440401` passed 45 tests,
+vet and executable builds, using disposable PostgreSQL, restricted roles and
+actual Runtime HTTP. Five new bridge tests cover atomic response rollback,
+lost replies for reads/rejections/success, takeover with changed rules,
+cancelled/old-owner denial, intent/archive authorization, response corruption,
+opt-in claims and large/skipped tool source labels. Two opt-in actual-Worker
+tests were skipped; this run contains no Node source runner, paid model call,
+live deployment or CI execution. The first attempt's fixture INSERT missed a
+required `attempt` column; its failing report is retained as
+`p25-working-state-e590ad43f079449c802d4c2be00c4d65`.
+
+After a policy comment and public `SourceEffects` type alias were added, final
+evidence `p25-working-state-1375e48e8b0b435db9f8a9c857d4b2b1` passed 15 focused
+state/source/migration tests with zero skips, plus vet/build. All 15 recorded
+source hashes match this implementation; the fixture was stopped. Independent
+static review found no blocking defect in this bridge. Lost HTTP responses are
+simulated by discarding the successful response in the test adapter; no actual
+network interruption or new-engine process kill occurred in these tests.
 
 ## Verification status
 

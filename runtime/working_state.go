@@ -199,24 +199,37 @@ func workingChange(raw []byte) (WorkingStateChange, []string, error) {
 	return in, keys, nil
 }
 
-// commitWorkingState is an internal fenced primitive for the forthcoming source
-// engine. It is intentionally not a new tool or a public mutation route: current
-// engines retain their historical tool sets and replay semantics.
+// commitWorkingState is the internal ledger primitive. Source-engine transport
+// uses the same transaction helper and commits its Exchange response atomically.
 func (s *Store) commitWorkingState(ctx context.Context, inv Invocation) (WorkingStateReceipt, error) {
 	var receipt WorkingStateReceipt
-	if inv.Name != "working_state_update" || !strings.HasPrefix(inv.OperationID, inv.RunID+"/working-state/") || len(inv.OperationID) > 240 {
-		return receipt, stateError(400, "invalid working-state operation identity")
-	}
-	in, references, err := workingChange(inv.Arguments)
-	if err != nil {
-		return receipt, err
-	}
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return receipt, err
 	}
 	defer tx.Rollback(ctx)
-	run, err := checkInvocation(ctx, tx, inv)
+	if err = lockRun(ctx, tx, inv.RunID, inv.Owner, inv.Fence, false); err != nil {
+		return receipt, err
+	}
+	run, err := scanRun(tx.QueryRow(ctx, "SELECT "+runColumns+" FROM runs WHERE id=$1", inv.RunID))
+	if err != nil {
+		return receipt, err
+	}
+	receipt, err = commitWorkingStateTx(ctx, tx, run, inv)
+	if err != nil {
+		return receipt, err
+	}
+	return receipt, tx.Commit(ctx)
+}
+
+// Caller holds the live run fence. Validation failures occur before mutations;
+// SQL failures must abort the whole transaction, never become replayable rejects.
+func commitWorkingStateTx(ctx context.Context, tx pgx.Tx, run Run, inv Invocation) (WorkingStateReceipt, error) {
+	var receipt WorkingStateReceipt
+	if inv.Name != "working_state_update" || !strings.HasPrefix(inv.OperationID, inv.RunID+"/working-state/") || len(inv.OperationID) > 240 {
+		return receipt, stateError(400, "invalid working-state operation identity")
+	}
+	in, references, err := workingChange(inv.Arguments)
 	if err != nil {
 		return receipt, err
 	}
@@ -236,10 +249,13 @@ func (s *Store) commitWorkingState(ctx context.Context, inv Invocation) (Working
 		if err = json.Unmarshal(oldReceipt, &receipt); err != nil {
 			return receipt, err
 		}
-		return receipt, tx.Commit(ctx)
+		return receipt, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return receipt, err
+	}
+	if run.RuleRevision != inv.RuleRevision {
+		return receipt, stateError(409, "constraints changed; old plan may not update working state")
 	}
 	var current int64
 	if err = tx.QueryRow(ctx, "SELECT COALESCE(max(revision),0) FROM run_working_states WHERE run_id=$1", inv.RunID).Scan(&current); err != nil {
@@ -290,7 +306,7 @@ func (s *Store) commitWorkingState(ctx context.Context, inv Invocation) (Working
 	if err = event(ctx, tx, inv.RunID, "working_state_committed", map[string]any{"receipt": receipt, "agent_id": run.Snapshot.AgentRef.ID}); err != nil {
 		return receipt, err
 	}
-	return receipt, tx.Commit(ctx)
+	return receipt, nil
 }
 
 // WorkingReceipt can recover a committed response after cancellation/takeover.
@@ -313,12 +329,16 @@ func (s *Store) WorkingReceipt(ctx context.Context, runID, operationID string) (
 // single SQL snapshot. A newer constraint revision marks the old working set
 // stale; an empty ledger does not invent an initialized or persisted checkpoint.
 func (s *Store) WorkingState(ctx context.Context, runID string, revision int64) (WorkingStateView, error) {
+	return readWorkingState(ctx, s.DB, runID, revision)
+}
+
+func readWorkingState(ctx context.Context, reader noteReader, runID string, revision int64) (WorkingStateView, error) {
 	v := WorkingStateView{RunID: runID, Evidence: []WorkingEvidence{}}
 	if revision < 0 {
 		return v, stateError(400, "invalid working-state revision")
 	}
 	var constraints, body, evidence []byte
-	err := s.DB.QueryRow(ctx, `SELECT r.task,r.constraints,r.rule_revision,COALESCE(w.revision,0),COALESCE(w.source_rule_revision,0),w.body,w.evidence
+	err := reader.QueryRow(ctx, `SELECT r.task,r.constraints,r.rule_revision,COALESCE(w.revision,0),COALESCE(w.source_rule_revision,0),w.body,w.evidence
  FROM runs r LEFT JOIN LATERAL (SELECT revision,source_rule_revision,body,evidence FROM run_working_states
  WHERE run_id=r.id AND ($2::bigint=0 OR revision=$2) ORDER BY revision DESC LIMIT 1) w ON true WHERE r.id=$1`, runID, revision).
 		Scan(&v.Task, &constraints, &v.RuleRevision, &v.Revision, &v.SourceRuleRevision, &body, &evidence)

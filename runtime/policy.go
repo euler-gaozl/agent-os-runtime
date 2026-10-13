@@ -5,8 +5,11 @@ import "strings"
 // Authorize preserves the per-service HTTP boundary; owning a Worker token
 // never permits bypassing ToolHub governance through direct Runtime invocation.
 func Authorize(caller, method, path string) bool {
+	if path == "/v1/source-state" {
+		return caller == "worker" && method == "POST"
+	}
 	// This derived ledger is not exposed through generic run-prefix grants.
-	// Agent writes and Worker reads await the versioned source-engine protocol.
+	// Worker state operations use the separate fenced source-engine route.
 	if strings.HasSuffix(path, "/working-state") {
 		return caller == "control" && method == "GET" && strings.HasPrefix(path, "/v1/runs/")
 	}

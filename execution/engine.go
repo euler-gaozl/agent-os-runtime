@@ -14,12 +14,14 @@ import (
 
 const Protocol = "runtime-execution-v1"
 const EngineDSHEvidence = runstate.EngineDSHEvidence
+const EngineDSHSource = runstate.EngineDSHSource
 
 type Run = contracts.Run
 type Message = contracts.Message
 type Tool = contracts.Tool
 type Frame = runstate.Frame
 type Effects = runstate.Effects
+type SourceEffects = runstate.SourceEffects
 type ArtifactWriter = runstate.ArtifactWriter
 type Receipt = runstate.Receipt
 type Child = runstate.Child
@@ -30,6 +32,12 @@ var ErrWaitingChildren = runstate.ErrWaitingChildren
 
 func New(db *pgxpool.Pool, archives ArtifactWriter) *Engine {
 	return &Engine{state: &runstate.Store{DB: db, Archives: archives}}
+}
+
+// NewSourceEnabled admits the new engine only after the caller verifies its
+// separate pinned source runner. New remains historical-engine-only.
+func NewSourceEnabled(db *pgxpool.Pool, archives ArtifactWriter) *Engine {
+	return &Engine{state: &runstate.Store{DB: db, Archives: archives, SourceEnabled: true}}
 }
 func Readiness(ctx context.Context, db *pgxpool.Pool) error {
 	if db == nil {

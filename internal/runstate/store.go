@@ -12,8 +12,9 @@ import (
 
 // Store is internal to this owner module. Its database never crosses the public execution facade.
 type Store struct {
-	DB       *pgxpool.Pool
-	Archives ArtifactWriter
+	DB            *pgxpool.Pool
+	Archives      ArtifactWriter
+	SourceEnabled bool
 }
 type ArtifactWriter interface {
 	PutArtifact(context.Context, []byte, string, string) (string, error)
@@ -107,13 +108,17 @@ func (s *Store) Runs(ctx context.Context) ([]Run, error) {
 	return out, rows.Err()
 }
 func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration) (Run, error) {
+	engines := []string{"legacy-go", "dsh-0.2.0-rc.2", EngineDSHEvidence}
+	if s.SourceEnabled {
+		engines = append(engines, EngineDSHSource)
+	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
 		return Run{}, e
 	}
 	defer tx.Rollback(ctx)
 	r, e := ScanRun(tx.QueryRow(ctx, `UPDATE runs SET status='running',owner=$1,fence=fence+1,lease_until=clock_timestamp()+$2::interval,updated_at=now()
- WHERE id=(SELECT id FROM runs r WHERE engine=ANY($3) AND (status='queued' OR (status='running' AND lease_until<clock_timestamp()) OR (status='waiting_children' AND NOT EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')))) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING `+RunColumns, owner, fmt.Sprintf("%f seconds", lease.Seconds()), []string{"legacy-go", "dsh-0.2.0-rc.2", EngineDSHEvidence}))
+ WHERE id=(SELECT id FROM runs r WHERE engine=ANY($3) AND (status='queued' OR (status='running' AND lease_until<clock_timestamp()) OR (status='waiting_children' AND NOT EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')))) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING `+RunColumns, owner, fmt.Sprintf("%f seconds", lease.Seconds()), engines))
 	if e != nil {
 		return r, e
 	}
