@@ -27,6 +27,15 @@ fixtures. Independent read-only review matched all 11 source hashes and found
 no blocker; it did not run tests. Worker/Node process acceptance and production
 release remain separate. No paid model calls or GitHub Actions ran.
 
+Subsequent Worker acceptance exercised both source engines with actual Node and
+Worker processes: three lost-reply/interruption/recovery modes per version, plus
+old-Worker to new-Worker takeover of an unchanged v1 task. All seven passed and
+were repeated successfully from a relocated complete Worker package (`346c003`),
+with the original package directory absent. Evidence:
+`p25-worker-resident-9646a337349a4343b6568d2a7c5fa408`. Runtime HTTP and PostgreSQL
+are real; model, ToolHub routing and immutable Storage are fixtures. This does
+not prove cross-engine migration, production activation or fast native resume.
+
 ## Boundaries
 
 - `runtime`: submission/management API, current ToolHub governance checks, local and external effect receipts, note lifecycle, event delivery, and the sole schema migration.

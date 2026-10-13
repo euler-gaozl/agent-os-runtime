@@ -21,22 +21,51 @@ import (
 // Real Worker.exe + source-built DSH, real restricted PostgreSQL roles and
 // Runtime HTTP. Provider, ToolHub routing and immutable Storage are fixtures.
 func TestIndependentSourceWorkerRecoversCommittedStateAfterCompactionAndLostReply(t *testing.T) {
-	testIndependentSourceWorker(t, true, false)
+	testIndependentSourceWorker(t, true, false, EngineDSHSource, "")
 }
 
 func TestIndependentSourceWorkerSurvivesLostStateHTTPReplyWithoutProcessDeath(t *testing.T) {
-	testIndependentSourceWorker(t, false, false)
+	testIndependentSourceWorker(t, false, false, EngineDSHSource, "")
 }
 
 func TestIndependentSourceWorkerExhaustedReplyRetriesRequireSafeOperatorRecovery(t *testing.T) {
-	testIndependentSourceWorker(t, false, true)
+	testIndependentSourceWorker(t, false, true, EngineDSHSource, "")
 }
 
-func testIndependentSourceWorker(t *testing.T, kill, exhausted bool) {
+func TestIndependentResidentWorkerRecoversCommittedStateAfterCompactionAndLostReply(t *testing.T) {
+	testIndependentSourceWorker(t, true, false, EngineDSHResident, "")
+}
+
+func TestIndependentResidentWorkerSurvivesLostStateHTTPReplyWithoutProcessDeath(t *testing.T) {
+	testIndependentSourceWorker(t, false, false, EngineDSHResident, "")
+}
+
+func TestIndependentResidentWorkerExhaustedReplyRetriesRequireSafeOperatorRecovery(t *testing.T) {
+	testIndependentSourceWorker(t, false, true, EngineDSHResident, "")
+}
+
+func TestIndependentSourceWorkerUpgradesV1AcrossCommittedStateInterruption(t *testing.T) {
+	old := os.Getenv("TEST_OLD_SOURCE_WORKER_BINARY")
+	if old == "" {
+		t.Skip("historical source-enabled Worker not configured")
+	}
+	testIndependentSourceWorker(t, true, false, EngineDSHSource, old)
+}
+
+func testIndependentSourceWorker(t *testing.T, kill, exhausted bool, version, firstBinary string) {
 	binary, _, node := requireEvidenceWorker(t)
 	runner := os.Getenv("TEST_SOURCE_DSH_RUNNER")
+	if version == EngineDSHResident {
+		runner = os.Getenv("TEST_RESIDENT_DSH_RUNNER")
+	}
 	if runner == "" {
 		t.Skip("source artifact not configured")
+	}
+	if firstBinary == "" {
+		firstBinary = binary
+	}
+	if info, err := os.Stat(firstBinary); err != nil || !info.Mode().IsRegular() {
+		t.Fatal("initial Worker unavailable")
 	}
 	db, role, workerRole := fixtureDatabase(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -211,14 +240,16 @@ func testIndependentSourceWorker(t *testing.T, kill, exhausted bool) {
 	snap.Agent.MaxSteps = 50
 	snap.Agent.Model.MaxTokens = 512
 	// Select only new roots through the same deployment option as the API.
-	if err := s.ConfigureSubmissionEngine(EngineDSHSource); err != nil {
+	if err := s.ConfigureSubmissionEngine(version); err != nil {
 		t.Fatal(err)
 	}
 	id := submit(t, s, snap)
 	archives := newArchiveHTTPFixtureToken(t, id, nil, workerToken)
 	s.StorageURL = archives.server.URL
 	config := map[string]string{"DATABASE_URL": evidenceWorkerDSN(t, db, workerRole), "SERVICE_TOKEN": workerToken, "SERVICE_PEERS": string(JSON(map[string]string{"worker": servicehttp.TokenHash(workerToken)})), "RUNTIME_URL": runtimeServer.URL, "REGISTRY_URL": runtimeServer.URL, "TOOLHUB_URL": hub.URL, "STORAGE_URL": archives.server.URL, "AGENTOS_NODE": node, "DSH_SOURCE_RUNNER": runner, "LISTEN": "127.0.0.1:0", "INSTANCE_ID": "source-first-attempt", "DB_MAX_CONNS": "3"}
-	first, firstDone := startEvidenceWorker(t, ctx, binary, config)
+	config["DSH_SOURCE_RUNNER"] = os.Getenv("TEST_SOURCE_DSH_RUNNER")
+	config["DSH_RESIDENT_RUNNER"] = os.Getenv("TEST_RESIDENT_DSH_RUNNER")
+	first, firstDone := startEvidenceWorker(t, ctx, firstBinary, config)
 	select {
 	case <-killPoint:
 	case <-firstDone:
@@ -310,7 +341,7 @@ func testIndependentSourceWorker(t *testing.T, kill, exhausted bool) {
 		wantFence = 2
 		wantUpdates = 4
 	}
-	if done.Status != "completed" || done.Fence != wantFence || done.Owner != config["INSTANCE_ID"] || !strings.Contains(done.State.Result, "actual 17 units") {
+	if done.Status != "completed" || done.Engine != version || done.Fence != wantFence || done.Owner != config["INSTANCE_ID"] || !strings.Contains(done.State.Result, "actual 17 units") {
 		t.Fatal("source recovery failed", done.Status, done.Fence, done.State.Error)
 	}
 	if (kill && models.Load() != beforeModels+1) || ordinary.Load() != 11 || toolHTTP.Load() != beforeTools || updateHTTP.Load() != wantUpdates {
@@ -360,5 +391,5 @@ func testIndependentSourceWorker(t *testing.T, kill, exhausted bool) {
 	if !compacted || previous != done.State.HarnessArtifact {
 		t.Fatal("compaction checkpoint missing")
 	}
-	t.Logf("Actual source Worker state revision 2 committed before lost HTTP reply; process killed=%t, retries exhausted=%t, fence=%d; no repeated model/tool/state effects; %d summaries, %d archives, %d event bytes", kill, exhausted, done.Fence, summaries.Load(), len(hashes), total)
+	t.Logf("Actual %s Worker state revision 2 committed before lost HTTP reply; process killed=%t, Worker upgraded=%t, retries exhausted=%t, fence=%d; no repeated model/tool/state effects; %d summaries, %d archives, %d event bytes", version, kill, firstBinary != binary, exhausted, done.Fence, summaries.Load(), len(hashes), total)
 }
