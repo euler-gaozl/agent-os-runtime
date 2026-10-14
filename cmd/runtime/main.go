@@ -21,6 +21,9 @@ func main() {
 			return nil, nil, err
 		}
 		server := &runtimeapi.Server{Store: s, Token: os.Getenv("SERVICE_TOKEN"), RegistryURL: os.Getenv("REGISTRY_URL"), KnowledgeURL: os.Getenv("KNOWLEDGE_URL"), SandboxURL: os.Getenv("SANDBOX_URL")}
+		if err := server.ConfigureReceiptExports(os.Getenv("APP_RECEIPT_EXPORTS")); err != nil {
+			return nil, nil, err
+		}
 		return server.Handler(c), nil, nil
 	})
 }

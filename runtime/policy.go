@@ -5,6 +5,9 @@ import "strings"
 // Authorize preserves the per-service HTTP boundary; owning a Worker token
 // never permits bypassing ToolHub governance through direct Runtime invocation.
 func Authorize(caller, method, path string) bool {
+	if path == "/v1/receipt-projections" {
+		return method == "GET" && (caller == "runtime" || caller == "control")
+	}
 	if path == "/v1/source-state" {
 		return caller == "worker" && method == "POST"
 	}

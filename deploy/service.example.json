@@ -12,5 +12,6 @@
   "DB_MAX_CONNS": "3",
   "HTTP_MAX_CONCURRENT": "16",
   "DEFAULT_RUN_ENGINE": "dsh-0.2.0-rc.2-evidence-v1",
+  "APP_RECEIPT_EXPORTS": "[]",
   "GOMEMLIMIT": "96MiB"
 }

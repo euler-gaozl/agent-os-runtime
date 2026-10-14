@@ -17,6 +17,8 @@ import (
 type Server struct {
 	Store                                        *Store
 	Token, RegistryURL, KnowledgeURL, SandboxURL string
+	ReceiptExports                               []ReceiptExport
+	receiptExportHash                            string
 }
 type handler func(http.ResponseWriter, *http.Request) error
 
@@ -29,6 +31,7 @@ func (s *Server) Handler(c servicehttp.Config) http.Handler {
 		s.toolRoutes(m)
 		s.applicationRoutes(m)
 		s.appEvidenceRoutes(m)
+		s.appReceiptRoutes(m)
 		s.sandboxAuthorizationRoutes(m)
 	})
 }

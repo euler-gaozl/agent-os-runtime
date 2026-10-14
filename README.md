@@ -40,6 +40,7 @@ resident-v2 是独立候选，需明确版本选择、匹配 Worker 编译 pin�
 - 中台 `/v1/runs/{id}/calls/page` 默认每页 25、最多 50 条摘要，未决调用独立过滤；游标绑定任务和过滤条件，列表不是数据库快照。
 - `/calls/record` 按操作、字段、Unicode 偏移和内容版本读取，默认 8,192、最多 16,384 字符；版本改变返回 409，SQL NULL 与 JSON null 分开。旧完整 Calls 接口保留兼容。
 - 应用 `/v1/apps/{app}/runs/{id}/evidence` 仅列该任务及子任务的成功 `document_read` 回执，最多 128 个可见任务，默认 20/最多 30 条；单条正文最多 8,192 字符。来源是当时实际读取片段，不是当前 Knowledge 查询；外部采集工具暂不纳入此列表。
+- 部署配置 `APP_RECEIPT_EXPORTS` 可明确允许应用读取特定工具的两个字符串字段。默认关闭；每项指定 app、id、tool、input_path、output_path，客户端不能更改路径或工具。`/v1/apps/{app}/runs/{id}/receipts/{profile}` 仅列本任务树已完成的工具回执；`/record` 按 input/output、操作、Unicode 偏移与版本分页。配置及输入/输出共同绑定版本，分别给出原字符串 SHA-256；不开放其他参数、模型消息或凭证，也不改变任务完成状态。业务解释由应用负责。历史 DSH/Worker 执行协议不变。
 - `run_recall` 列表最多 10 条，响应公开实际 `page_size` 和游标；操作正文保持 1,200 字符上限，非零偏移要求操作 ID。
 - MCP 握手使用短预算，执行传输响应头上限 35 秒、总计 40 秒，使 Sources 的 30 秒采集可返回；保留取消、网络策略和 4 MiB 响应界限。业务 `isError` 作为工具回执保存，传输失败不能伪造“无效果”回执。
 
