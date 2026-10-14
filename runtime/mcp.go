@@ -8,8 +8,10 @@ import (
 	"github.com/euler-gaozl/agent-os-sdk/mcp"
 	"github.com/euler-gaozl/agent-os-sdk/mcpsecurity"
 	"github.com/euler-gaozl/agent-os-sdk/servicehttp"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 type MCPClient = mcp.MCPClient
@@ -30,6 +32,15 @@ func executeCheckedMCP(ctx context.Context, c Connector, name string, args json.
 	if e := rpc.Initialize(ctx); e != nil {
 		return nil, errors.New("MCP handshake failed")
 	}
+	// Discovery/handshake use the short policy timeout. Execution must also
+	// accommodate a bounded upstream fetch (Sources allows 30s) and its error
+	// response; abandoning headers at 8s hid that result from the Agent.
+	// Create a separate transport rather than mutate one already in use.
+	executionClient := policy.Client()
+	executionClient.Timeout = 40 * time.Second
+	executionClient.Transport.(*http.Transport).ResponseHeaderTimeout = 35 * time.Second
+	defer executionClient.CloseIdleConnections()
+	rpc.HTTP = executionClient
 	result, e := rpc.RPC(ctx, "tools/call", map[string]any{"name": name, "arguments": args}, false)
 	if e != nil {
 		return nil, errors.New("MCP execution failed; receipt requires reconciliation for effectful tools")

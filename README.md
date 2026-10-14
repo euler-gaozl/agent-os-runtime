@@ -4,6 +4,14 @@ Independent owner of execution state, run leases, model/tool receipts, DSH excha
 
 ## App-scoped retained document reads
 
+MCP execution keeps the policy client's short handshake budget, then uses a
+separate transport with a 35-second response-header limit and 40-second total
+limit. This lets Sources return the result of its bounded 30-second collection
+attempt, including `isError` responses, which are retained and replayed as tool
+results. Network policy, caller cancellation and 4 MiB response bounds remain
+unchanged. Transport failure still leaves effectful tools unknown; it is never
+converted into a fabricated no-effect receipt. ToolHub discovery is unchanged.
+
 The `run_recall` tool accepts its published `limit` parameter for both listing
 and operation reads. Listing honors smaller requests and caps pages at the
 existing ten receipts; an explicit limit returns `page_size` so callers can
