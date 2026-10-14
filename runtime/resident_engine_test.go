@@ -10,8 +10,8 @@ import (
 )
 
 func TestSourceVersionClaimsRequireExactOptIn(t *testing.T) {
-	for _, version := range []string{EngineDSHSource, EngineDSHResident} {
-		for _, config := range []string{"historical", "v1-api", "v1", "v2", "both"} {
+	for _, version := range []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
+		for _, config := range []string{"historical", "v1-api", "v1", "v2", "both", "v3", "all"} {
 			t.Run(version+"/"+config, func(t *testing.T) {
 				f := sourceSetupVersion(t, version)
 				ctx := context.Background()
@@ -29,12 +29,16 @@ func TestSourceVersionClaimsRequireExactOptIn(t *testing.T) {
 					e, err = execution.NewSourceVersions(f.worker, f.archive, []string{EngineDSHResident})
 				case "both":
 					e, err = execution.NewSourceVersions(f.worker, f.archive, []string{EngineDSHSource, EngineDSHResident})
+				case "v3":
+					e, err = execution.NewSourceVersions(f.worker, f.archive, []string{EngineDSHBudget})
+				case "all":
+					e, err = execution.NewSourceVersions(f.worker, f.archive, []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget})
 				}
 				if err != nil {
 					t.Fatal(err)
 				}
 				r, err := e.Claim(ctx, "explicit-version", time.Minute)
-				allowed := config == "both" || (version == EngineDSHSource && (config == "v1" || config == "v1-api")) || (version == EngineDSHResident && config == "v2")
+				allowed := config == "all" || (config == "both" && version != EngineDSHBudget) || (version == EngineDSHSource && (config == "v1" || config == "v1-api")) || (version == EngineDSHResident && config == "v2") || (version == EngineDSHBudget && config == "v3")
 				if allowed {
 					if err != nil || r.Engine != version || r.Fence <= f.r.Fence {
 						t.Fatal("wrong engine claim", r.Engine, err)

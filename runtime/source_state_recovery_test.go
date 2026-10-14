@@ -11,7 +11,7 @@ import (
 )
 
 func TestSourceStateOperatorRecoveryBoundary(t *testing.T) {
-	for _, version := range []string{EngineDSHSource, EngineDSHResident} {
+	for _, version := range []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
 		t.Run(version, func(t *testing.T) {
 			for _, mode := range []string{"valid", "preview-then-cancel", "cancelled", "historical", "running", "unconfirmed", "later-model", "later-unconfirmed-state", "unknown-tool", "inflight-model", "worker", "toolhub"} {
 				t.Run(mode, func(t *testing.T) {
@@ -131,7 +131,7 @@ func TestSourceStateOperatorRecoveryBoundary(t *testing.T) {
 }
 
 func TestSourceStateUnknownCancellationDoesNotResumeEffects(t *testing.T) {
-	for _, version := range []string{EngineDSHSource, EngineDSHResident} {
+	for _, version := range []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
 		t.Run(version, func(t *testing.T) {
 			for _, unresolved := range []bool{false, true} {
 				t.Run(fmt.Sprint(unresolved), func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestSourceStateUnknownCancellationDoesNotResumeEffects(t *testing.T) {
 }
 
 func TestSourceStateUnknownCancellationWaitsForActiveChild(t *testing.T) {
-	for _, version := range []string{EngineDSHSource, EngineDSHResident} {
+	for _, version := range []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
 		t.Run(version, func(t *testing.T) {
 			f := sourceSetupVersion(t, version)
 			ctx := context.Background()

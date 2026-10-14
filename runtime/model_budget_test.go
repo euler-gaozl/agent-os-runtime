@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -55,6 +56,63 @@ func TestFamilyBudgetSerializesParentAndChildAttempts(t *testing.T) {
 	u, e := s.Usage(ctx, child.ID)
 	if e != nil || u.RootID != root || u.Attempts != 1 || u.UnknownUsageAttempts != 1 {
 		t.Fatalf("family accounting incorrect: %+v %v", u, e)
+	}
+}
+
+func TestModelBudgetInvalidUsageKeepsReservationAndTotalsDoNotWrap(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	snap := basicSnapshot("https://example.invalid")
+	snap.Agent.MaxModelAttempts = 0
+	snap.Agent.ModelTokenBudget = 0
+	submit(t, s, snap)
+	r := claim(t, s, "usage-validation")
+	request := []byte(`{"max_tokens":100,"messages":[]}`)
+	var reservation int64
+	for i, raw := range []string{`{"usage":{}}`, `{"usage":{"prompt_tokens":20}}`, `{"usage":{"prompt_tokens":null,"completion_tokens":0}}`,
+		`{"usage":{"prompt_tokens":20,"completion_tokens":1,"prompt_cache_hit_tokens":30}}`,
+		`{"usage":{"prompt_tokens":20,"completion_tokens":1,"prompt_cache_hit_tokens":-1}}`,
+		`{"usage":{"prompt_tokens":20.5,"completion_tokens":1}}`} {
+		id := r.ID + "/" + ID()
+		attempt, _, e := s.BeginModel(ctx, r, id, request)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = s.EndModel(ctx, r, id, attempt, []byte(raw), nil); e != nil {
+			t.Fatal(e)
+		}
+		// jsonb has its own stable serialization; use the retained request, as
+		// the family ledger does, rather than the compact fixture input bytes.
+		var stored []byte
+		if e = s.DB.QueryRow(ctx, "SELECT request FROM model_attempts WHERE id=$1", attempt).Scan(&stored); e != nil {
+			t.Fatal(e)
+		}
+		reservation += int64(len(stored) + 100 + 512)
+		u, e := s.Usage(ctx, r.ID)
+		if e != nil || u.Attempts != i+1 || u.UnknownUsageAttempts != i+1 || u.AccountedTokens != reservation {
+			t.Fatal("invalid usage consumed zero", u, e)
+		}
+	}
+	for range 2 {
+		id := r.ID + "/" + ID()
+		attempt, _, e := s.BeginModel(ctx, r, id, request)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = s.EndModel(ctx, r, id, attempt, []byte(`{"usage":{"prompt_tokens":6000000000000000000,"completion_tokens":1}}`), nil); e != nil {
+			t.Fatal(e)
+		}
+	}
+	u, e := s.Usage(ctx, r.ID)
+	if e != nil || u.AccountedTokens != math.MaxInt64 || u.PromptTokens != math.MaxInt64 {
+		t.Fatal("family totals wrapped", u, e)
+	}
+	snap.Agent.ModelTokenBudget = 500000
+	if _, e = s.DB.Exec(ctx, "UPDATE runs SET snapshot=$2 WHERE id=$1", r.ID, JSON(snap)); e != nil {
+		t.Fatal(e)
+	}
+	if _, _, e = s.BeginModel(ctx, r, r.ID+"/after-overflow", request); e == nil || !strings.Contains(e.Error(), "token budget exhausted") {
+		t.Fatal("overflow reopened budget", e)
 	}
 }
 func TestModelBudgetCountsUnknownRetryButAllowsCachedReplay(t *testing.T) {

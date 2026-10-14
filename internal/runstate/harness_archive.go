@@ -14,9 +14,10 @@ import (
 const EngineDSHEvidence = "dsh-0.2.0-rc.2-evidence-v1"
 const EngineDSHSource = "dsh-source-639ed015-state-v1"
 const EngineDSHResident = "dsh-source-639ed015-resident-v2"
+const EngineDSHBudget = "dsh-source-639ed015-budget-v3"
 
 func IsSourceEngine(engine string) bool {
-	return engine == EngineDSHSource || engine == EngineDSHResident
+	return engine == EngineDSHSource || engine == EngineDSHResident || engine == EngineDSHBudget
 }
 
 func hasIncrementalEvidence(engine string) bool {

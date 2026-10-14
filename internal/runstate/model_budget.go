@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgx/v5"
+	"math"
 )
 
 type ModelUsage struct {
@@ -37,7 +39,62 @@ func requestReservation(request []byte) int64 {
 	}
 	// UTF-8 request bytes plus output cap and framing allowance is deliberately
 	// conservative. This is a token guard, not an exact money/price estimate.
-	return int64(len(request) + r.MaxTokens + 512)
+	return saturatingTokens(int64(len(request)), int64(r.MaxTokens), 512)
+}
+
+// Saturation fails closed under malformed provider counters; accounting must
+// never wrap negative and open a budget after a very large receipt.
+func saturatingTokens(values ...int64) int64 {
+	var total int64
+	for _, n := range values {
+		if n < 0 || n > math.MaxInt64-total {
+			return math.MaxInt64
+		}
+		total += n
+	}
+	return total
+}
+
+type ProviderUsage struct {
+	PromptTokens       int64 `json:"prompt_tokens"`
+	CompletionTokens   int64 `json:"completion_tokens"`
+	CachedPromptTokens int64 `json:"cached_prompt_tokens"`
+}
+
+// Parse the immutable provider receipt, not a transport's default-valued struct.
+// A missing cache field means no reported cache hits; missing required totals,
+// null/fractional/negative/inconsistent counts mean unknown usage.
+func providerUsage(response []byte) *ProviderUsage {
+	var receipt struct {
+		Usage map[string]json.RawMessage `json:"usage"`
+	}
+	if json.Unmarshal(response, &receipt) != nil || receipt.Usage == nil {
+		return nil
+	}
+	read := func(name string, required bool) (int64, bool) {
+		raw, ok := receipt.Usage[name]
+		if !ok {
+			return 0, !required
+		}
+		var value *int64
+		if json.Unmarshal(raw, &value) != nil || value == nil || *value < 0 {
+			return 0, false
+		}
+		return *value, true
+	}
+	prompt, p := read("prompt_tokens", true)
+	completion, c := read("completion_tokens", true)
+	cached, h := read("prompt_cache_hit_tokens", false)
+	if !p || !c || !h || cached > prompt || completion > math.MaxInt64-prompt {
+		return nil
+	}
+	if _, exists := receipt.Usage["total_tokens"]; exists {
+		total, ok := read("total_tokens", true)
+		if !ok || total != prompt+completion {
+			return nil
+		}
+	}
+	return &ProviderUsage{prompt, completion, cached}
 }
 func usageFor(ctx context.Context, tx pgx.Tx, runID string) (ModelUsage, error) {
 	var out ModelUsage
@@ -62,22 +119,14 @@ func usageFor(ctx context.Context, tx pgx.Tx, runID string) (ModelUsage, error) 
 			return out, e
 		}
 		out.Attempts++
-		var receipt struct {
-			Usage *struct {
-				Prompt     int64 `json:"prompt_tokens"`
-				Completion int64 `json:"completion_tokens"`
-				Cached     int64 `json:"prompt_cache_hit_tokens"`
-			} `json:"usage"`
-		}
-		if json.Unmarshal(response, &receipt) == nil && receipt.Usage != nil && receipt.Usage.Prompt >= 0 && receipt.Usage.Completion >= 0 {
-			u := receipt.Usage
-			out.PromptTokens += u.Prompt
-			out.CompletionTokens += u.Completion
-			out.CachedPromptTokens += u.Cached
-			out.AccountedTokens += u.Prompt + u.Completion
+		if u := providerUsage(response); u != nil {
+			out.PromptTokens = saturatingTokens(out.PromptTokens, u.PromptTokens)
+			out.CompletionTokens = saturatingTokens(out.CompletionTokens, u.CompletionTokens)
+			out.CachedPromptTokens = saturatingTokens(out.CachedPromptTokens, u.CachedPromptTokens)
+			out.AccountedTokens = saturatingTokens(out.AccountedTokens, u.PromptTokens, u.CompletionTokens)
 		} else {
 			out.UnknownUsageAttempts++
-			out.AccountedTokens += requestReservation(request)
+			out.AccountedTokens = saturatingTokens(out.AccountedTokens, requestReservation(request))
 		}
 	}
 	return out, rows.Err()
@@ -107,8 +156,8 @@ func reserveModelBudget(ctx context.Context, tx pgx.Tx, runID string, request []
 	if u.MaxAttempts > 0 && u.Attempts >= u.MaxAttempts {
 		return errors.New("family model attempt budget exhausted (retries included)")
 	}
-	if u.TokenBudget > 0 && u.AccountedTokens+requestReservation(request) > int64(u.TokenBudget) {
-		return errors.New("family model token budget exhausted (unknown attempts reserved)")
+	if u.TokenBudget > 0 && saturatingTokens(u.AccountedTokens, requestReservation(request)) > int64(u.TokenBudget) {
+		return fmt.Errorf("family model token budget exhausted (accounted=%d, next_reservation=%d, limit=%d, unknown_attempts=%d)", u.AccountedTokens, requestReservation(request), u.TokenBudget, u.UnknownUsageAttempts)
 	}
 	return nil
 }

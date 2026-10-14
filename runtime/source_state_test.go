@@ -101,7 +101,7 @@ func stateFrame(seq int, method string, args []byte) execution.Frame {
 }
 
 func TestSourceEngineOptInAndCheckpointBarrier(t *testing.T) {
-	for _, version := range []string{EngineDSHSource, EngineDSHResident} {
+	for _, version := range []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
 		t.Run(version, func(t *testing.T) {
 			f := sourceSetupVersion(t, version)
 			ctx := context.Background()
@@ -147,7 +147,7 @@ func TestSourceEngineOptInAndCheckpointBarrier(t *testing.T) {
 }
 
 func TestSourceStateFrozenReadAndRejectedReplyRecovery(t *testing.T) {
-	for _, version := range []string{EngineDSHSource, EngineDSHResident} {
+	for _, version := range []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
 		t.Run(version, func(t *testing.T) {
 			f := sourceSetupVersion(t, version)
 			ctx := context.Background()
@@ -205,7 +205,7 @@ func TestSourceStateFrozenReadAndRejectedReplyRecovery(t *testing.T) {
 }
 
 func TestSourceStateAtomicResponseTakeoverRulesAndCancellation(t *testing.T) {
-	for _, version := range []string{EngineDSHSource, EngineDSHResident} {
+	for _, version := range []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
 		t.Run(version, func(t *testing.T) {
 			f := sourceSetupVersion(t, version)
 			ctx := context.Background()
@@ -301,7 +301,7 @@ func TestSourceStateAtomicResponseTakeoverRulesAndCancellation(t *testing.T) {
 }
 
 func TestSourceStateIdentityIntentArchiveAndSoleResponseWriter(t *testing.T) {
-	for _, version := range []string{EngineDSHSource, EngineDSHResident} {
+	for _, version := range []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
 		t.Run(version, func(t *testing.T) {
 			f := sourceSetupVersion(t, version)
 			ctx := context.Background()
@@ -362,7 +362,7 @@ func TestSourceStateIdentityIntentArchiveAndSoleResponseWriter(t *testing.T) {
 }
 
 func TestSourceToolReceiptLabelsLargeAndSkippedResults(t *testing.T) {
-	for _, version := range []string{EngineDSHSource, EngineDSHResident} {
+	for _, version := range []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
 		t.Run(version, func(t *testing.T) {
 			f := sourceSetupVersion(t, version)
 			ctx := context.Background()

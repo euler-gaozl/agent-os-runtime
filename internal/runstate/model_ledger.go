@@ -44,19 +44,38 @@ func (s *Store) BeginModel(ctx context.Context, r Run, id string, request []byte
 		return "", nil, e
 	}
 	var revision int64
-	if e = tx.QueryRow(ctx, "SELECT rule_revision FROM runs WHERE id=$1", r.ID).Scan(&revision); e != nil {
+	var engine string
+	if e = tx.QueryRow(ctx, "SELECT rule_revision,engine FROM runs WHERE id=$1", r.ID).Scan(&revision, &engine); e != nil {
 		return "", nil, e
 	}
 	if revision != r.RuleRevision {
 		return "", nil, ErrFence
 	}
-	var status, hash string
+	if engine == EngineDSHBudget || r.Engine == EngineDSHBudget {
+		if engine != r.Engine {
+			return "", nil, errors.New("model engine differs from immutable run")
+		}
+		if e = checkBudgetModelIntent(ctx, tx, r, id, request, false); e != nil {
+			return "", nil, e
+		}
+		rejected, err := InspectBudgetRequest(request, r.Snapshot.Agent.ContextTokens, r.Snapshot.Agent.Model.MaxTokens)
+		if err != nil {
+			return "", nil, err
+		}
+		if rejected != nil {
+			return "", nil, errors.New("context rejection must be committed without a model attempt")
+		}
+	}
+	var status, hash, callRun, kind string
 	var response, previousRequest []byte
-	e = tx.QueryRow(ctx, "SELECT status,request_hash,response,request FROM calls WHERE id=$1", id).Scan(&status, &hash, &response, &previousRequest)
+	e = tx.QueryRow(ctx, "SELECT status,request_hash,response,request,run_id,kind FROM calls WHERE id=$1", id).Scan(&status, &hash, &response, &previousRequest, &callRun, &kind)
 	if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 		return "", nil, e
 	}
 	if e == nil {
+		if r.Engine == EngineDSHBudget && (callRun != r.ID || kind != "model") {
+			return "", nil, errors.New("model operation collides with another receipt")
+		}
 		if hash != Hash(request) && canonicalHash(previousRequest) != canonicalHash(request) {
 			return "", nil, errors.New("model request changed within same logical call")
 		}

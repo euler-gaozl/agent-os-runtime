@@ -16,6 +16,7 @@ const Protocol = "runtime-execution-v1"
 const EngineDSHEvidence = runstate.EngineDSHEvidence
 const EngineDSHSource = runstate.EngineDSHSource
 const EngineDSHResident = runstate.EngineDSHResident
+const EngineDSHBudget = runstate.EngineDSHBudget
 
 func IsSourceEngine(engine string) bool { return runstate.IsSourceEngine(engine) }
 
@@ -25,6 +26,17 @@ type Tool = contracts.Tool
 type Frame = runstate.Frame
 type Effects = runstate.Effects
 type SourceEffects = runstate.SourceEffects
+type BudgetModelEffects = runstate.BudgetModelEffects
+type ModelContextRejection = runstate.ModelContextRejection
+
+func BudgetModelRequest(config contracts.ModelConfig, messages []Message, tools []Tool) []byte {
+	return runstate.BudgetModelRequest(config, messages, tools)
+}
+
+func InspectBudgetRequest(request []byte, contextTokens, maxTokens int) (*ModelContextRejection, error) {
+	return runstate.InspectBudgetRequest(request, contextTokens, maxTokens)
+}
+
 type ArtifactWriter = runstate.ArtifactWriter
 type Receipt = runstate.Receipt
 type Child = runstate.Child
@@ -58,6 +70,8 @@ func NewSourceVersions(db *pgxpool.Pool, archives ArtifactWriter, engines []stri
 			s.SourceEnabled = true
 		case EngineDSHResident:
 			s.ResidentEnabled = true
+		case EngineDSHBudget:
+			s.BudgetEnabled = true
 		default:
 			return nil, errors.New("unsupported source engine")
 		}

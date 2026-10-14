@@ -16,6 +16,7 @@ type Store struct {
 	Archives        ArtifactWriter
 	SourceEnabled   bool
 	ResidentEnabled bool
+	BudgetEnabled   bool
 }
 type ArtifactWriter interface {
 	PutArtifact(context.Context, []byte, string, string) (string, error)
@@ -129,6 +130,9 @@ func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration) (R
 	if s.ResidentEnabled {
 		engines = append(engines, EngineDSHResident)
 	}
+	if s.BudgetEnabled {
+		engines = append(engines, EngineDSHBudget)
+	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
 		return Run{}, e
@@ -217,7 +221,7 @@ func (s *Store) Cancel(ctx context.Context, id string) error {
  OR (status='waiting_unknown' AND engine=ANY($2)
  AND (SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1) IN('working_state_read','working_state_update')
  AND NOT EXISTS(SELECT 1 FROM calls c WHERE c.run_id=r.id AND c.status IN('inflight','unknown')))
- THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, []string{EngineDSHSource, EngineDSHResident})
+ THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget})
 	if e != nil {
 		return e
 	}

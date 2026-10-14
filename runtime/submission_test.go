@@ -55,7 +55,7 @@ func TestSubmissionHTTPPreservesEngineAcrossDeploymentAndChildren(t *testing.T) 
 			return w
 		}
 		body := `{"agent":{"id":"test","revision":1},"task":"explicit submission fixture"}`
-		for _, firstEngine := range []string{EngineDSHEvidence, EngineDSHSource, EngineDSHResident} {
+		for _, firstEngine := range []string{EngineDSHEvidence, EngineDSHSource, EngineDSHResident, EngineDSHBudget} {
 			if err := s.ConfigureSubmissionEngine(firstEngine); err != nil {
 				t.Fatal(err)
 			}

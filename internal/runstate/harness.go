@@ -33,6 +33,7 @@ type ModelInput struct {
 	Messages  []Message `json:"messages"`
 	Tools     []Tool    `json:"tools"`
 	MaxTokens int       `json:"max_tokens"`
+	Purpose   string    `json:"purpose,omitempty"`
 }
 
 func canonicalHash(b []byte) string {
@@ -85,7 +86,12 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 				}
 			}
 			if f.Method == "model" {
-				r.State.PlanRevision = revision
+				var result struct {
+					Kind string `json:"kind"`
+				}
+				if r.Engine != EngineDSHBudget || json.Unmarshal(response, &result) == nil && result.Kind == "completion" {
+					r.State.PlanRevision = revision
+				}
 				r.Step++
 			}
 			var value any
@@ -195,6 +201,8 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	}
 	op := fmt.Sprintf("%s/dsh/%d", r.ID, f.ID)
 	var value any
+	var budgetRequest json.RawMessage
+	var budgetMaxTokens int
 	done := false
 	switch f.Method {
 	case "checkpoint":
@@ -225,6 +233,12 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		if e = json.Unmarshal(request, &m); e != nil {
 			return nil, false, e
 		}
+		if r.Engine == EngineDSHBudget {
+			budgetMaxTokens, e = budgetOutputLimit(r.Snapshot, m)
+			if e != nil {
+				return nil, false, e
+			}
+		}
 		modelRun := *r
 		modelRun.Snapshot.Agent.Model.MaxTokens = m.MaxTokens
 		// Preserve old snapshots' behavior. Explicit operator caps apply to every
@@ -232,12 +246,23 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		if cap := r.Snapshot.Agent.Model.MaxTokens; cap > 0 && (m.MaxTokens == 0 || cap < m.MaxTokens) {
 			modelRun.Snapshot.Agent.Model.MaxTokens = cap
 		}
-		message, err := effects.CompleteModel(ctx, modelRun, op, m.Messages, m.Tools)
-		if err != nil {
-			return nil, false, err
+		if r.Engine == EngineDSHBudget {
+			budget, ok := effects.(BudgetModelEffects)
+			if !ok {
+				return nil, false, errors.New("budget model transport unavailable")
+			}
+			budgetRequest, e = budget.CompleteBudgetModel(ctx, modelRun, op, m.Messages, m.Tools)
+			if e != nil {
+				return nil, false, e
+			}
+		} else {
+			message, err := effects.CompleteModel(ctx, modelRun, op, m.Messages, m.Tools)
+			if err != nil {
+				return nil, false, err
+			}
+			value = message
+			r.State.PlanRevision = revision
 		}
-		value = message
-		r.State.PlanRevision = revision
 	case "tool":
 		var in struct {
 			Name      string          `json:"name"`
@@ -309,6 +334,23 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	defer tx.Rollback(ctx)
 	if e = LockRun(ctx, tx, r.ID, r.Owner, r.Fence, false); e != nil {
 		return nil, false, e
+	}
+	if f.Method == "model" && r.Engine == EngineDSHBudget {
+		value, e = freezeBudgetModel(ctx, tx, *r, op, budgetRequest, budgetMaxTokens)
+		if e != nil {
+			return nil, false, e
+		}
+		// Concurrent callbacks cannot replace an already frozen outcome.
+		var retained []byte
+		if e = tx.QueryRow(ctx, "SELECT response FROM harness_exchanges WHERE run_id=$1 AND seq=$2", r.ID, f.ID).Scan(&retained); e != nil {
+			return nil, false, e
+		}
+		if retained != nil && canonicalHash(retained) != canonicalHash(JSON(value)) {
+			return nil, false, errors.New("budget model outcome already frozen differently")
+		}
+		if _, ok := value.(*ModelCompletion); ok {
+			r.State.PlanRevision = revision
+		}
 	}
 	if f.Method == "working_state_read" || f.Method == "working_state_update" {
 		// Runtime is the sole response writer for source-state exchanges. Never

@@ -58,5 +58,6 @@ const runColumns = runstate.RunColumns
 const EngineDSHEvidence = runstate.EngineDSHEvidence
 const EngineDSHSource = runstate.EngineDSHSource
 const EngineDSHResident = runstate.EngineDSHResident
+const EngineDSHBudget = runstate.EngineDSHBudget
 
 func isSourceEngine(engine string) bool { return runstate.IsSourceEngine(engine) }

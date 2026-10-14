@@ -17,7 +17,7 @@ func (s *Store) ConfigureSubmissionEngine(engine string) error {
 		engine = EngineDSHEvidence
 	}
 	if engine != EngineDSHEvidence && !isSourceEngine(engine) {
-		return errors.New("DEFAULT_RUN_ENGINE must name the evidence-v1, source state-v1 or source resident-v2 engine")
+		return errors.New("DEFAULT_RUN_ENGINE must name evidence-v1, source state-v1, resident-v2 or budget-v3")
 	}
 	s.submissionEngine = engine
 	return nil
