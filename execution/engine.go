@@ -17,6 +17,9 @@ const EngineDSHEvidence = runstate.EngineDSHEvidence
 const EngineDSHSource = runstate.EngineDSHSource
 const EngineDSHResident = runstate.EngineDSHResident
 const EngineDSHBudget = runstate.EngineDSHBudget
+const EngineDSHNative = runstate.EngineDSHNative
+const NativeRequestBytes = runstate.NativeRequestBytes
+const NativeResponseBytes = runstate.NativeResponseBytes
 
 func IsSourceEngine(engine string) bool { return runstate.IsSourceEngine(engine) }
 
@@ -27,7 +30,25 @@ type Frame = runstate.Frame
 type Effects = runstate.Effects
 type SourceEffects = runstate.SourceEffects
 type BudgetModelEffects = runstate.BudgetModelEffects
+type NativeModelEffects = runstate.NativeModelEffects
+type NativeProviderReceipt = runstate.NativeProviderReceipt
 type ModelContextRejection = runstate.ModelContextRejection
+
+func NativeModelRequest(config contracts.ModelConfig, messages []Message, tools []Tool) []byte {
+	return runstate.NativeModelRequest(config, messages, tools)
+}
+func InspectNativeRequest(request []byte, snap contracts.Snapshot) error {
+	return runstate.InspectNativeRequest(request, snap)
+}
+func NativeReceipt(status int, body []byte) ([]byte, error) {
+	return runstate.NativeReceipt(status, body)
+}
+func ReadNativeReceipt(raw []byte) (NativeProviderReceipt, error) {
+	return runstate.ReadNativeReceipt(raw)
+}
+func NativeContextRejected(status int, body []byte) bool {
+	return runstate.NativeContextRejected(status, body)
+}
 
 func BudgetModelRequest(config contracts.ModelConfig, messages []Message, tools []Tool) []byte {
 	return runstate.BudgetModelRequest(config, messages, tools)
@@ -72,6 +93,8 @@ func NewSourceVersions(db *pgxpool.Pool, archives ArtifactWriter, engines []stri
 			s.ResidentEnabled = true
 		case EngineDSHBudget:
 			s.BudgetEnabled = true
+		case EngineDSHNative:
+			s.NativeEnabled = true
 		default:
 			return nil, errors.New("unsupported source engine")
 		}

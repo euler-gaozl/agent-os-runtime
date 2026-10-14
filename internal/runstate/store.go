@@ -17,6 +17,7 @@ type Store struct {
 	SourceEnabled   bool
 	ResidentEnabled bool
 	BudgetEnabled   bool
+	NativeEnabled   bool
 }
 type ArtifactWriter interface {
 	PutArtifact(context.Context, []byte, string, string) (string, error)
@@ -66,6 +67,20 @@ func insertRunEngine(ctx context.Context, tx pgx.Tx, key, task string, snap Snap
 		return "", errors.New("idempotency key reused with different input")
 	}
 	if actual == id {
+		taskLimit := 40000
+		if engine == EngineDSHNative {
+			taskLimit = 16 << 20
+		}
+		if len(task) > taskLimit {
+			return "", errors.New("new task exceeds execution transport capacity")
+		}
+		if engine == EngineDSHNative {
+			if err := ValidateNativeSnapshot(snap); err != nil {
+				return "", err
+			}
+		} else if hasNativeCapabilities(snap) {
+			return "", errors.New("native model capabilities require the native execution engine")
+		}
 		if e = EmitEvent(ctx, tx, id, "accepted", map[string]any{"agent": snap.AgentRef}); e != nil {
 			return "", e
 		}
@@ -132,6 +147,9 @@ func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration) (R
 	}
 	if s.BudgetEnabled {
 		engines = append(engines, EngineDSHBudget)
+	}
+	if s.NativeEnabled {
+		engines = append(engines, EngineDSHNative)
 	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
@@ -221,7 +239,7 @@ func (s *Store) Cancel(ctx context.Context, id string) error {
  OR (status='waiting_unknown' AND engine=ANY($2)
  AND (SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1) IN('working_state_read','working_state_update')
  AND NOT EXISTS(SELECT 1 FROM calls c WHERE c.run_id=r.id AND c.status IN('inflight','unknown')))
- THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget})
+ THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget, EngineDSHNative})
 	if e != nil {
 		return e
 	}

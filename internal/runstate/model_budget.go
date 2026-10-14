@@ -119,6 +119,13 @@ func usageFor(ctx context.Context, tx pgx.Tx, runID string) (ModelUsage, error) 
 			return out, e
 		}
 		out.Attempts++
+		if snap.Agent.Model.Limits != nil {
+			if receipt, err := ReadNativeReceipt(response); err == nil {
+				response = receipt.Body
+			} else {
+				response = nil
+			}
+		}
 		if u := providerUsage(response); u != nil {
 			out.PromptTokens = saturatingTokens(out.PromptTokens, u.PromptTokens)
 			out.CompletionTokens = saturatingTokens(out.CompletionTokens, u.CompletionTokens)

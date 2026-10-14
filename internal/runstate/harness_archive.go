@@ -15,10 +15,13 @@ const EngineDSHEvidence = "dsh-0.2.0-rc.2-evidence-v1"
 const EngineDSHSource = "dsh-source-639ed015-state-v1"
 const EngineDSHResident = "dsh-source-639ed015-resident-v2"
 const EngineDSHBudget = "dsh-source-639ed015-budget-v3"
+const EngineDSHNative = "dsh-source-639ed015-native-v4"
 
 func IsSourceEngine(engine string) bool {
-	return engine == EngineDSHSource || engine == EngineDSHResident || engine == EngineDSHBudget
+	return engine == EngineDSHSource || engine == EngineDSHResident || engine == EngineDSHBudget || engine == EngineDSHNative
 }
+
+func hasDurableModelOutcome(engine string) bool { return engine == EngineDSHBudget || engine == EngineDSHNative }
 
 func hasIncrementalEvidence(engine string) bool {
 	return engine == EngineDSHEvidence || IsSourceEngine(engine)
@@ -52,7 +55,9 @@ type HarnessArchive struct {
 // intent. A replay must use this first committed batch, not regenerated event
 // timestamps or identifiers. No external effect may precede archive commit.
 func stageHarnessArchive(ctx context.Context, tx pgx.Tx, r Run, f Frame) error {
-	if len(f.Events) > archiveBatchBytes || !utf8.Valid(f.Events) {
+	limit := archiveBatchBytes
+	if r.Engine == EngineDSHNative { limit = 64 << 20 }
+	if len(f.Events) > limit || !utf8.Valid(f.Events) {
 		return errors.New("DSH event batch exceeds retention budget or is not UTF-8")
 	}
 	var events []json.RawMessage

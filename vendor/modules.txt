@@ -1,4 +1,4 @@
-# github.com/euler-gaozl/agent-os-sdk v0.1.0-rc.2
+# github.com/euler-gaozl/agent-os-sdk v0.1.0-rc.3
 ## explicit; go 1.27.0
 github.com/euler-gaozl/agent-os-sdk/contracts
 github.com/euler-gaozl/agent-os-sdk/mcp

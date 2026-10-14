@@ -59,5 +59,6 @@ const EngineDSHEvidence = runstate.EngineDSHEvidence
 const EngineDSHSource = runstate.EngineDSHSource
 const EngineDSHResident = runstate.EngineDSHResident
 const EngineDSHBudget = runstate.EngineDSHBudget
+const EngineDSHNative = runstate.EngineDSHNative
 
 func isSourceEngine(engine string) bool { return runstate.IsSourceEngine(engine) }

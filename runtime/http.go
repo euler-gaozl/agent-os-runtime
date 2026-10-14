@@ -38,7 +38,10 @@ func jsonResponse(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func decode(w http.ResponseWriter, r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+	return decodeLimit(w, r, dst, 2<<20)
+}
+func decodeLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if e := d.Decode(dst); e != nil {
@@ -332,11 +335,11 @@ func (s *Server) runtimeRoutes(mux *http.ServeMux) {
 			Task        string   `json:"task"`
 			Constraints []string `json:"constraints"`
 		}
-		if e := decode(w, r, &in); e != nil {
+		if e := decodeLimit(w, r, &in, s.Store.submissionBodyLimit()); e != nil {
 			return e
 		}
 		key := r.Header.Get("Idempotency-Key")
-		if key == "" || len(key) > 200 || strings.TrimSpace(in.Task) == "" || len(in.Task) > 40000 || len(JSON(in.Constraints)) > 16000 {
+		if key == "" || len(key) > 200 || strings.TrimSpace(in.Task) == "" || len(in.Task) > s.Store.submissionTaskLimit() || len(JSON(in.Constraints)) > 16000 {
 			return errors.New("idempotency key and bounded task required")
 		}
 		snap, e := s.Store.Snapshot(r.Context(), in.Agent, 0)

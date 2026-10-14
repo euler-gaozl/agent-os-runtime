@@ -15,11 +15,11 @@ func (s *Server) applicationRoutes(mux *http.ServeMux) {
 			Task     string          `json:"task"`
 			Metadata json.RawMessage `json:"metadata"`
 		}
-		if e := decode(w, r, &in); e != nil {
+		if e := decodeLimit(w, r, &in, s.Store.submissionBodyLimit()); e != nil {
 			return e
 		}
 		key := r.Header.Get("Idempotency-Key")
-		if !safeName.MatchString(app) || key == "" || len(key) > 180 || len(in.Task) == 0 || len(in.Task) > 40000 || len(in.Metadata) > 4000 {
+		if !safeName.MatchString(app) || key == "" || len(key) > 180 || len(in.Task) == 0 || len(in.Task) > s.Store.submissionTaskLimit() || len(in.Metadata) > 4000 {
 			return errors.New("bounded app submission and idempotency key required")
 		}
 		if s.Store.Remote == nil {

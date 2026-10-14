@@ -89,7 +89,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 				var result struct {
 					Kind string `json:"kind"`
 				}
-				if r.Engine != EngineDSHBudget || json.Unmarshal(response, &result) == nil && result.Kind == "completion" {
+				if !hasDurableModelOutcome(r.Engine) || json.Unmarshal(response, &result) == nil && result.Kind == "completion" {
 					r.State.PlanRevision = revision
 				}
 				r.Step++
@@ -239,6 +239,9 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 				return nil, false, e
 			}
 		}
+		if r.Engine == EngineDSHNative && (m.MaxTokens != r.Snapshot.Agent.Model.MaxTokens || (m.Purpose != "generation" && m.Purpose != "compaction")) {
+			return nil, false, errors.New("native purpose/output differs from frozen capabilities")
+		}
 		modelRun := *r
 		modelRun.Snapshot.Agent.Model.MaxTokens = m.MaxTokens
 		// Preserve old snapshots' behavior. Explicit operator caps apply to every
@@ -252,6 +255,15 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 				return nil, false, errors.New("budget model transport unavailable")
 			}
 			budgetRequest, e = budget.CompleteBudgetModel(ctx, modelRun, op, m.Messages, m.Tools)
+			if e != nil {
+				return nil, false, e
+			}
+		} else if r.Engine == EngineDSHNative {
+			native, ok := effects.(NativeModelEffects)
+			if !ok {
+				return nil, false, errors.New("native model transport unavailable")
+			}
+			budgetRequest, e = native.CompleteNativeModel(ctx, modelRun, op, m.Messages, m.Tools)
 			if e != nil {
 				return nil, false, e
 			}
@@ -335,8 +347,12 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	if e = LockRun(ctx, tx, r.ID, r.Owner, r.Fence, false); e != nil {
 		return nil, false, e
 	}
-	if f.Method == "model" && r.Engine == EngineDSHBudget {
-		value, e = freezeBudgetModel(ctx, tx, *r, op, budgetRequest, budgetMaxTokens)
+	if f.Method == "model" && hasDurableModelOutcome(r.Engine) {
+		if r.Engine == EngineDSHNative {
+			value, e = freezeNativeModel(ctx, tx, *r, op, budgetRequest)
+		} else {
+			value, e = freezeBudgetModel(ctx, tx, *r, op, budgetRequest, budgetMaxTokens)
+		}
 		if e != nil {
 			return nil, false, e
 		}

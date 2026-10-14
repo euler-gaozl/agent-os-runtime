@@ -17,7 +17,7 @@ func (s *Store) ConfigureSubmissionEngine(engine string) error {
 		engine = EngineDSHEvidence
 	}
 	if engine != EngineDSHEvidence && !isSourceEngine(engine) {
-		return errors.New("DEFAULT_RUN_ENGINE must name evidence-v1, source state-v1, resident-v2 or budget-v3")
+		return errors.New("DEFAULT_RUN_ENGINE must name evidence-v1, source state-v1, resident-v2, budget-v3 or native-v4")
 	}
 	s.submissionEngine = engine
 	return nil
@@ -28,6 +28,16 @@ func (s *Store) defaultRunEngine() string {
 		return EngineDSHEvidence
 	}
 	return s.submissionEngine
+}
+
+// Transport bounds are byte/resource guards, not token budgets. They cannot
+// depend on the current default: a retry may belong to an older native run.
+// The insertion transaction checks the selected engine only for a NEW run.
+func (s *Store) submissionBodyLimit() int64 {
+	return 32 << 20
+}
+func (s *Store) submissionTaskLimit() int {
+	return 16 << 20
 }
 
 func (s *Store) insertRoot(ctx context.Context, tx pgx.Tx, key, task string, snap Snapshot, pinned []string) (string, error) {

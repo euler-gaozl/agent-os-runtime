@@ -66,6 +66,14 @@ func (s *Store) BeginModel(ctx context.Context, r Run, id string, request []byte
 			return "", nil, errors.New("context rejection must be committed without a model attempt")
 		}
 	}
+	if engine == EngineDSHNative || r.Engine == EngineDSHNative {
+		if engine != r.Engine {
+			return "", nil, errors.New("model engine differs from immutable run")
+		}
+		if e = checkNativeModelIntent(ctx, tx, r, id, request, false); e != nil {
+			return "", nil, e
+		}
+	}
 	var status, hash, callRun, kind string
 	var response, previousRequest []byte
 	e = tx.QueryRow(ctx, "SELECT status,request_hash,response,request,run_id,kind FROM calls WHERE id=$1", id).Scan(&status, &hash, &response, &previousRequest, &callRun, &kind)
@@ -73,7 +81,7 @@ func (s *Store) BeginModel(ctx context.Context, r Run, id string, request []byte
 		return "", nil, e
 	}
 	if e == nil {
-		if r.Engine == EngineDSHBudget && (callRun != r.ID || kind != "model") {
+		if hasDurableModelOutcome(r.Engine) && (callRun != r.ID || kind != "model") {
 			return "", nil, errors.New("model operation collides with another receipt")
 		}
 		if hash != Hash(request) && canonicalHash(previousRequest) != canonicalHash(request) {
