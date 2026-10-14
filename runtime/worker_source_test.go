@@ -44,6 +44,18 @@ func TestIndependentResidentWorkerExhaustedReplyRetriesRequireSafeOperatorRecove
 	testIndependentSourceWorker(t, false, true, EngineDSHResident, "")
 }
 
+func TestIndependentBudgetWorkerRecoversCommittedStateAfterCompactionAndLostReply(t *testing.T) {
+	testIndependentSourceWorker(t, true, false, EngineDSHBudget, "")
+}
+
+func TestIndependentBudgetWorkerSurvivesLostStateHTTPReplyWithoutProcessDeath(t *testing.T) {
+	testIndependentSourceWorker(t, false, false, EngineDSHBudget, "")
+}
+
+func TestIndependentBudgetWorkerExhaustedReplyRetriesRequireSafeOperatorRecovery(t *testing.T) {
+	testIndependentSourceWorker(t, false, true, EngineDSHBudget, "")
+}
+
 func TestIndependentSourceWorkerUpgradesV1AcrossCommittedStateInterruption(t *testing.T) {
 	old := os.Getenv("TEST_OLD_SOURCE_WORKER_BINARY")
 	if old == "" {
@@ -57,6 +69,9 @@ func testIndependentSourceWorker(t *testing.T, kill, exhausted bool, version, fi
 	runner := os.Getenv("TEST_SOURCE_DSH_RUNNER")
 	if version == EngineDSHResident {
 		runner = os.Getenv("TEST_RESIDENT_DSH_RUNNER")
+	}
+	if version == EngineDSHBudget {
+		runner = os.Getenv("TEST_BUDGET_DSH_RUNNER")
 	}
 	if runner == "" {
 		t.Skip("source artifact not configured")
@@ -249,6 +264,7 @@ func testIndependentSourceWorker(t *testing.T, kill, exhausted bool, version, fi
 	config := map[string]string{"DATABASE_URL": evidenceWorkerDSN(t, db, workerRole), "SERVICE_TOKEN": workerToken, "SERVICE_PEERS": string(JSON(map[string]string{"worker": servicehttp.TokenHash(workerToken)})), "RUNTIME_URL": runtimeServer.URL, "REGISTRY_URL": runtimeServer.URL, "TOOLHUB_URL": hub.URL, "STORAGE_URL": archives.server.URL, "AGENTOS_NODE": node, "DSH_SOURCE_RUNNER": runner, "LISTEN": "127.0.0.1:0", "INSTANCE_ID": "source-first-attempt", "DB_MAX_CONNS": "3"}
 	config["DSH_SOURCE_RUNNER"] = os.Getenv("TEST_SOURCE_DSH_RUNNER")
 	config["DSH_RESIDENT_RUNNER"] = os.Getenv("TEST_RESIDENT_DSH_RUNNER")
+	config["DSH_BUDGET_RUNNER"] = os.Getenv("TEST_BUDGET_DSH_RUNNER")
 	first, firstDone := startEvidenceWorker(t, ctx, firstBinary, config)
 	select {
 	case <-killPoint:
