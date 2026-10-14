@@ -319,6 +319,101 @@ func TestNativeSubmissionLargeTextEngineBindingAndCancellation(t *testing.T) {
 	}
 }
 
+func TestNativeDefaultKeepsLegacyAgentsAndChildrenUsable(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	if err := s.ConfigureSubmissionEngine(EngineDSHNative); err != nil {
+		t.Fatal(err)
+	}
+	legacy := basicSnapshot("https://fixture.invalid")
+	legacy.Children = map[string]Snapshot{"old": basicSnapshot("https://fixture.invalid")}
+	key := ID()
+	id, err := s.Submit(ctx, key, "legacy revision", legacy, nil)
+	if err != nil {
+		t.Fatal("native default broke frozen legacy agent", err)
+	}
+	r, err := s.Run(ctx, id)
+	if err != nil || r.Engine != EngineDSHBudget {
+		t.Fatal("legacy tree did not retain v3 protocol", err)
+	}
+	if err = s.ConfigureSubmissionEngine(EngineDSHSource); err != nil {
+		t.Fatal(err)
+	}
+	if retry, err := s.Submit(ctx, key, "legacy revision", legacy, nil); err != nil || retry != id {
+		t.Fatal("retry changed after default switch", err)
+	}
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	childID, err := insertRun(ctx, tx, ID(), "child", legacy.Children["old"], &id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.Run(ctx, childID)
+	if err != nil || child.Engine != EngineDSHBudget {
+		t.Fatal("child did not inherit selected v3", err)
+	}
+	_ = s.ConfigureSubmissionEngine(EngineDSHNative)
+	mixed := basicSnapshot("https://fixture.invalid")
+	mixed.Children = map[string]Snapshot{"new": nativeSnapshot()}
+	if _, err = s.Submit(ctx, ID(), "mixed tree", mixed, nil); err == nil {
+		t.Fatal("mixed legacy parent/native child accepted")
+	}
+}
+
+func TestNativeDefaultPreservesExpandedLegacyPrompts(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	agent := basicSnapshot("https://fixture.invalid").Agent
+	agent.Prompts = []Ref{{ID: "bound", Revision: 1}}
+	root := agent
+	root.ChildAgents = []Ref{{ID: "child", Revision: 1}}
+	bound := strings.Repeat("p", 33000)
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+testToken {
+			t.Error("snapshot lost Registry identity")
+		}
+		switch r.URL.Path {
+		case "/v1/resources/agent/root/1":
+			jsonResponse(w, 200, Resource{Kind: "agent", ID: "root", Revision: 1, Spec: JSON(root)})
+		case "/v1/resources/agent/child/1":
+			jsonResponse(w, 200, Resource{Kind: "agent", ID: "child", Revision: 1, Spec: JSON(agent)})
+		case "/v1/resources/prompt/bound/1":
+			jsonResponse(w, 200, Resource{Kind: "prompt", ID: "bound", Revision: 1, Spec: JSON(Skill{Content: bound})})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer peer.Close()
+	s.Remote = &serviceclient.Client{RegistryURL: peer.URL, Token: testToken}
+	snap, err := s.Snapshot(ctx, Ref{ID: "root", Revision: 1}, 0)
+	if err != nil {
+		t.Fatal("valid legacy definition failed to resolve", err)
+	}
+	wantPrompt := agent.Prompt + "\n\n" + bound
+	if snap.Agent.Prompt != wantPrompt || snap.Children["child"].Agent.Prompt != wantPrompt {
+		t.Fatal("bound prompt missing from root or child")
+	}
+	for _, engine := range []string{EngineDSHBudget, EngineDSHNative} {
+		if err := s.ConfigureSubmissionEngine(engine); err != nil {
+			t.Fatal(err)
+		}
+		id, err := s.Submit(ctx, ID(), "legacy bound prompts", snap, nil)
+		if err != nil {
+			t.Fatal("deployment default changed valid legacy submission", engine, err)
+		}
+		run, err := s.Run(ctx, id)
+		if err != nil || run.Engine != EngineDSHBudget || run.Snapshot.Agent.Prompt != wantPrompt || run.Snapshot.Children["child"].Agent.Prompt != wantPrompt {
+			t.Fatal("legacy engine or expanded prompts changed", err)
+		}
+	}
+}
+
 func TestNativeEngineNeedsExplicitClaimOptIn(t *testing.T) {
 	f := nativeSetup(t)
 	ctx := context.Background()

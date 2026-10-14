@@ -58,6 +58,13 @@ func insertRunEngine(ctx context.Context, tx pgx.Tx, key, task string, snap Snap
 			return "", e
 		}
 	}
+	// A native-capable deployment still serves frozen legacy Agent revisions.
+	// All-native trees use v4; wholly legacy trees keep the fixed v3 protocol.
+	// Mixed trees remain rejected by native validation, never silently rewritten.
+	legacyOnNative := parent == nil && engine == EngineDSHNative && !hasNativeCapabilities(snap)
+	if legacyOnNative {
+		engine = EngineDSHBudget
+	}
 	e := tx.QueryRow(ctx, `INSERT INTO runs(id,submission_key,input_hash,parent_id,snapshot,task,state,constraints,engine) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
  ON CONFLICT(submission_key) DO UPDATE SET submission_key=EXCLUDED.submission_key RETURNING id,input_hash`, id, key, inputHash, parent, JSON(snap), task, JSON(state), JSON(constraints), engine).Scan(&actual, &oldHash)
 	if e != nil {
@@ -67,6 +74,11 @@ func insertRunEngine(ctx context.Context, tx pgx.Tx, key, task string, snap Snap
 		return "", errors.New("idempotency key reused with different input")
 	}
 	if actual == id {
+		if legacyOnNative {
+			if err := validateLegacyModelTree(snap); err != nil {
+				return "", err
+			}
+		}
 		taskLimit := 40000
 		if engine == EngineDSHNative {
 			taskLimit = 16 << 20
@@ -86,6 +98,23 @@ func insertRunEngine(ctx context.Context, tx pgx.Tx, key, task string, snap Snap
 		}
 	}
 	return actual, nil
+}
+
+func validateLegacyModelTree(snap Snapshot) error {
+	a := snap.Agent
+	// Agent definitions were validated before Snapshot appended bound prompts.
+	// Revalidating the expanded prompt here would change legacy acceptance.
+	// Only guard the frozen legacy model ranges against missing native metadata;
+	// zero retains the historical default semantics, without rewriting the snapshot.
+	if (a.ContextTokens != 0 && (a.ContextTokens < 8192 || a.ContextTokens > 1000000)) || a.Model.MaxTokens < 0 || a.Model.MaxTokens > 32768 {
+		return errors.New("model capabilities required for native context or output sizes")
+	}
+	for _, child := range snap.Children {
+		if err := validateLegacyModelTree(child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (s *Store) Submit(ctx context.Context, key, task string, snap Snapshot, pinned []string) (string, error) {
 	tx, e := s.DB.Begin(ctx)
