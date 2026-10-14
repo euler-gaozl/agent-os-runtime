@@ -8,6 +8,67 @@ import (
 	"testing"
 )
 
+func TestRunRecallListingLimitMatchesPublishedSchema(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	snap := basicSnapshot("https://fixture.invalid")
+	snap.Agent.Tools = append(snap.Agent.Tools, "run_recall")
+	submit(t, s, snap)
+	run := claim(t, s, "limit-test")
+	invoke := func(id, name string, args any) ([]byte, error) {
+		return s.LocalTool(ctx, Invocation{RunID: run.ID, Owner: run.Owner, Fence: run.Fence, RuleRevision: run.RuleRevision, OperationID: run.ID + "/" + id, Name: name, Arguments: JSON(args)})
+	}
+	for i := 0; i < 13; i++ {
+		if _, e := invoke(fmt.Sprintf("note/%02d", i), "note_save", map[string]string{"kind": "evidence", "title": "retained source", "content": "bounded listing fixture", "source": "fixture://source"}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	for _, limit := range []int{1, 5, 50, 1200} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			key := fmt.Sprintf("list/%d", limit)
+			first, e := invoke(key, "run_recall", map[string]any{"kind": "tools", "limit": limit})
+			if e != nil {
+				t.Fatal(e)
+			}
+			var page struct {
+				Items []struct {
+					ID string `json:"id"`
+				}
+				Next string `json:"next_cursor"`
+				More bool   `json:"has_more"`
+				Size int    `json:"page_size"`
+			}
+			if e = json.Unmarshal(first, &page); e != nil || len(page.Items) != min(limit, 10) || !page.More || page.Next != page.Items[len(page.Items)-1].ID || page.Size != min(limit, 10) {
+				t.Fatalf("%s %v", first, e)
+			}
+			repeat, e := invoke(key, "run_recall", map[string]any{"kind": "tools", "limit": limit})
+			if e != nil || canonicalHash(repeat) != canonicalHash(first) {
+				t.Fatal("listing retry changed receipt", e)
+			}
+			next, e := invoke(key+"/next", "run_recall", map[string]any{"kind": "tools", "limit": limit, "after": page.Next})
+			if e != nil {
+				t.Fatal(e)
+			}
+			var tail struct {
+				Items []struct {
+					ID string `json:"id"`
+				}
+			}
+			if e = json.Unmarshal(next, &tail); e != nil || len(tail.Items) == 0 || tail.Items[0].ID <= page.Next {
+				t.Fatalf("invalid seek page: %s %v", next, e)
+			}
+		})
+	}
+	if _, e := invoke("events", "run_recall", map[string]any{"kind": "events", "limit": 50}); e != nil {
+		t.Fatal(e)
+	}
+	for i, args := range []map[string]any{{"limit": 1201}, {"limit": -1}, {"offset": 1, "limit": 50}} {
+		if _, e := invoke(fmt.Sprintf("invalid/%d", i), "run_recall", args); e == nil {
+			t.Fatal("invalid request accepted", args)
+		}
+	}
+}
+
 func TestRunRecallScopesPagesAndReplaysItsOriginalView(t *testing.T) {
 	s, _ := testStore(t)
 	ctx := context.Background()

@@ -4,6 +4,15 @@ Independent owner of execution state, run leases, model/tool receipts, DSH excha
 
 ## App-scoped retained document reads
 
+The `run_recall` tool accepts its published `limit` parameter for both listing
+and operation reads. Listing honors smaller requests and caps pages at the
+existing ten receipts; an explicit limit returns `page_size` so callers can
+follow `next_cursor` rather than assume their requested count was returned.
+Operation reads keep the 1200-character bound, and nonzero offset still requires
+an operation ID. Historical successful receipts replay unchanged. This fixes a
+real source-harness run that failed on schema-valid `{kind:"tools",limit:50}`;
+the replay/scope behavior and data schema are unchanged.
+
 `GET /v1/apps/{app}/runs/{id}/evidence` lists successful `document_read`
 receipts from that app task and its descendants (at most 128 visible tasks).
 It returns bounded previews, document identifiers and original read ranges;
