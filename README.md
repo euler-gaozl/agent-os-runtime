@@ -96,3 +96,21 @@ Windows 正式安装以 [集成计划](https://github.com/euler-gaozl/agent-os/b
 定向入口：`go test -mod=vendor -race -count=1 ./runtime -run '^TestNativeSourceStateHTTP(Recovery|CancelAfterPreview|UnresolvedAndArchive)$' -timeout 120s`。必须提供本机隔离测试的 `TEST_DATABASE_URL`；未提供时的 skip 不算通过。2026-10-15 在维护者 macOS 15.3 arm64 / Go 1.27.2 / PostgreSQL 18.6 实际执行，3 个顶层测试、4 个子场景全部通过，零 skip，race 包耗时 2.427 秒，exit=0；`go vet -mod=vendor ./runtime` 通过。清理后夹具数据库、角色及连接均为 0。
 
 此测试的回复丢失由 HTTP 成功返回后主动丢弃回调结果模拟，不是 TCP 丢包或独立 Worker 重试。归档失败场景实际停在 `failed/not_waiting`，未覆盖 `archive_unconfirmed` 原因。没有执行官方 Node/独立 Worker/实际 Storage、真实供应商、浏览器或 Windows 验收，也没有实现新的通用续跑策略；生产代码、固定引擎及已安装 Runtime 均未改变。
+
+## 失败任务只读接续预览
+
+新增 control 专用 `GET /v1/runs/{id}/continuation`，协议为 `failed-run-continuation-preview-v1`。响应固定 `read_only=true`、`action_available=false`；`same_run_candidate` 只是本次持久化记录符合已知条件，不是续跑许可。此接口没有执行动作，不调用旧 `/resume`，不改变已有任务、固定预算、Snapshot、引擎、Worker pin 或 execution 协议。
+
+首版只正向评估 native-v4 根任务：任务为 failed、没有取消或族内未决工具/模型、子任务已终态；整个冻结 Snapshot 的 native 能力和有限预算有效；exchange 序列完整，较早帧都有冻结回复，所有帧已有归档确认；最后帧是未冻结回复的 model，规则修订一致。该帧的 call 和当前 attempt 必须均为 failed，请求与回执一致，保留的完整 `NativeReceipt` 为 HTTP 503，原请求与冻结 input/模型配置一致。重试仍是同一帧，所以 `model_rounds <= MaxSteps`；全族全部状态的模型尝试数必须小于根任务原 `MaxModelAttempts`，不增加旧额度。
+
+取消和 completed 优先分类。failed/waiting_unknown 会检查真实根及全族的 unknown/inflight 工具效果，其后 waiting_unknown 返回核对要求；其余活动状态直接返回 `not_applicable/not_failed`。历史/未知引擎、失败子任务、格式异常、未确认归档、非白名单失败等按证据返回 blocked 或 manual_review。manual_review 不表示必须新建任务，也不表示旧引擎不可恢复。业务不适用结果均为 HTTP 200；缺少运行为 404，内部读取失败/超时为通用 503，不回显 SQL/回执。仅 control GET 可访问；参数覆盖和未知查询均拒绝，响应禁止缓存。
+
+读取使用一个 10 秒有界 `REPEATABLE READ READ ONLY` 事务；元数据聚合不加载整族模型正文。Snapshot、最后冻结 input 和最后 call request 在 SQL CASE 中按 native 32 MiB 限额控制传输，receipt envelope 最多 64 MiB 且解码后的 body 仍按 native 32 MiB 校验；超限返回人工核对。JSONB 文本格式按保守字节界限判断，极限记录可能需要人工核对。任何后续执行接口都必须重新加锁核验当前状态和预算；不能把 observed_at/assessment 当授权或可靠费用估计。
+
+本预览只验证已保存的归档确认元数据，不读取实际 Storage 字节，不探测当前 Registry、工具治理、供应商或费用。旧 `/resume` 语义保持不变，Console/Futures 尚未接入此接口；自动接续、带幂等回执的显式动作、配置变更后的新任务承接和 UI 验收仍未实现。此处实现说明与下面实际验证结果应分开记录，不能把可编译候选记作真实业务验收。
+
+定向入口：`go test -mod=vendor -race -count=1 -timeout 180s ./runtime -run '^(TestContinuationPreview|TestRuntimePeerBoundaries$)'`，必须提供本机隔离的 `TEST_DATABASE_URL`。2026-10-15 在维护者 macOS 15.3 arm64 / Go 1.27.2 / PostgreSQL 18.6 上实际执行：6 个新增顶层测试及 1 个既有身份策略测试、17 个子场景全部通过，0 fail/skip，race 包完成事件耗时 4.327 秒，命令 exit=0；`go vet -mod=vendor ./...` 与 `go build -mod=vendor ./...` 均 exit=0。
+
+覆盖同帧最后轮次、全族尝试预算、真实未知工具路径、取消、未确认归档、约束修订、非 503 回执、未决模型、活动子任务、非模型末帧，以及明确标记的损坏账本反例。并发测试在第一次读取建立快照后，通过既有显式 resume/Claim 与合成失败回执推进另一方，证明首次读取保持一致快照，随后新读取看到预算耗尽；预览自身不执行 resume。测试还比较 12 张表的内容摘要及调用计数，拒绝外部 HTTP/归档访问。
+
+以上是正式 Owner HTTP、真实 PostgreSQL 事务与合成模型回执测试，使用 NOLOGIN/SET ROLE 和内存归档；不等于独立账号登录、官方 Node/独立 Worker/实际 Storage 或真实供应商验收。没有穷举所有旧引擎、超大记录和损坏亲缘组合。夹具清理后数据库、角色及连接均为 0，10 个已有服务在测试前后身份与文件摘要不变。代码及执行结果已有独立评审；安装结果另记主仓本次 Mac 增量。未运行浏览器、Windows 或 GitHub Actions，未新增付费模型调用。

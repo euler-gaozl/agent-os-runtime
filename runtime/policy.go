@@ -5,6 +5,10 @@ import "strings"
 // Authorize preserves the per-service HTTP boundary; owning a Worker token
 // never permits bypassing ToolHub governance through direct Runtime invocation.
 func Authorize(caller, method, path string) bool {
+	// The new read-only management projection is not a generic peer run read.
+	if strings.HasSuffix(path, "/continuation") {
+		return caller == "control" && method == "GET" && strings.HasPrefix(path, "/v1/runs/")
+	}
 	if path == "/v1/receipt-projections" {
 		return method == "GET" && (caller == "runtime" || caller == "control")
 	}
