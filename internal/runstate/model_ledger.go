@@ -91,6 +91,22 @@ func (s *Store) BeginModel(ctx context.Context, r Run, id string, request []byte
 			return "", response, tx.Commit(ctx)
 		}
 	}
+	if engine == EngineDSHNative {
+		// Completed receipts above remain replayable. Only a new attempt must
+		// match the current rules, while the run row is still locked. Exchange
+		// may have refreshed r.RuleRevision while retaining an older intent.
+		seq, err := budgetExchangeSeq(r, id)
+		if err != nil {
+			return "", nil, err
+		}
+		var intentRevision int64
+		if e = tx.QueryRow(ctx, "SELECT rule_revision FROM harness_exchanges WHERE run_id=$1 AND seq=$2", r.ID, seq).Scan(&intentRevision); e != nil {
+			return "", nil, e
+		}
+		if intentRevision != revision {
+			return "", nil, errors.New("native model intent constraint revision is outdated")
+		}
+	}
 	if e = reserveModelBudget(ctx, tx, r.ID, request); e != nil {
 		return "", nil, e
 	}
