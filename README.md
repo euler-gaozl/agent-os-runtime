@@ -124,3 +124,9 @@ native-v4 的 BeginModel 在运行行锁内、已完成回执缓存返回之后�
 2026-10-15 独立 Mac（macOS 15.3 / arm64，Go 1.27.2，隔离 PostgreSQL 18.6）用正常 API、内存归档和合成回执复现了两个旧代码反例，并验证修复、成功缓存重放及同修订重试；相邻 native、预算、约束、取消和回执回归通过。它们不是供应商或业务验收。详细 Mac 证据见主仓维护知识库的后续增量。
 
 Worker 直接运行自己编译的固定 execution 模块，因此仅更新 Runtime HTTP 服务不能覆盖本检查。现有 rc.5 Worker 需显式更新不可变模块 pin、vendor 和实际二进制后再做联合验证；不得保持 rc.5 名称而静默修改 vendor。新 continuation 写动作及 UI 仍未实现。本段提交时记录的是执行库修复，Worker 部署结果须以独立后续证据为准。
+
+新增可选的 `TestIndependentNativeWorkerRevisionGuard`（macOS/Linux）使用独立旧、新 Worker 二进制、固定官方 native-v4 Node runner、真实 Runtime HTTP 与隔离 PostgreSQL。显式提供 `TEST_DATABASE_URL`、`TEST_OLD_WORKER_BINARY`、`TEST_NEW_WORKER_BINARY`、新包绑定的 `TEST_NEW_WORKER_SHA256`/`TEST_NEW_WORKER_RUNTIME_VERSION`、`TEST_NATIVE_DSH_RUNNER` 和 `AGENTOS_NODE` 后运行 `go test -mod=vendor -race -count=1 -timeout 240s ./runtime -run '^TestIndependentNativeWorkerRevisionGuard$'`；未配置时的跳过不算通过。
+
+2026-10-15 在上述 Mac 环境实际执行，三个子场景全部通过、零跳过：旧 rc.5 在约束修订后发送两次；固定到 `1f6c4c29c62bac3ad6d674b7797a7410f373bf00` 的新 Worker 只保留首次 503、拒绝新增尝试；同修订的新 Worker 重试正常完成，首次未知用量仍保留。首次测试因 JSONB 读回改变对象键序而有两项原始字节比较失败，原记录保留；修订测试比较完整 JSON 值与冻结意图、调用及所有尝试，并另存原始字节哈希，没有更改生产代码或二进制来通过测试。
+
+模型为有界 loopback TLS 服务，归档为 HTTP 夹具，未调用真实供应商或实际 Storage。六个临时 Worker 正常退出，夹具数据库、角色和连接均已清理；十个既有服务在测试前后保持不变。此测试不证明 Windows、真实业务、完整发布包或后续安装成功，实际部署组合另记主仓 Mac 增量。
