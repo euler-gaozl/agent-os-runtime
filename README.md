@@ -90,3 +90,9 @@ Windows 正式安装以 [集成计划](https://github.com/euler-gaozl/agent-os/b
 定向入口：`go test -mod=vendor -race -count=1 ./runtime -run '^TestNativeNote(LifecycleReplyLossExpiryAndRetirement|ConcurrentHeadConflicts)$' -timeout 120s`。需要显式提供 `TEST_DATABASE_URL`；未提供时按既有夹具跳过，不能记为数据库通过。两个顶层测试，其中并发测试有两个子场景；自然有效期等待约 8 秒。2026-10-15 在独立 macOS 15.3 arm64 / Go 1.27.2 / PostgreSQL 18.6 上实际执行：2 个顶层测试、2 个并发子场景全部通过，零 skip，race 包耗时 10.533 秒，命令 exit=0；`go vet -mod=vendor ./runtime` 也通过。详细版本、故障范围及清理证据归主仓本次 Mac 增量记录。
 
 这是 Owner/native-v4 协议及真实 PostgreSQL 事务覆盖；合成模型 usage 不是供应商消耗或费用，内存归档不是实际 Storage 持久化，SET ROLE 不是独立账号登录。没有执行官方 Harness/独立 Worker 进程、管理浏览器或 Windows 验收。旧生命周期、权限、历史分叉及集成故障覆盖继续保留，不能据此关闭完整 W09/P2.5。
+
+新增 `runtime/source_state_native_recovery_test.go` 验证现有 native-v4 工作状态恢复 HTTP 边界。通过正常 Submit/Claim、真实隔离 PostgreSQL 与正式 HTTP 身份策略，检查工作状态读/更新已提交但调用方丢弃成功回复后进入 `waiting_unknown`；只有 control 可以预览和显式恢复。约束修订后，旧回执仍重放当时视图，接管后的新读取看到当前约束；重复恢复、旧 fence、取消后的恢复及未完成调用均被拒绝。模型回执与归档使用合成/内存夹具，不 SQL 改写运行状态来促成恢复。
+
+定向入口：`go test -mod=vendor -race -count=1 ./runtime -run '^TestNativeSourceStateHTTP(Recovery|CancelAfterPreview|UnresolvedAndArchive)$' -timeout 120s`。必须提供本机隔离测试的 `TEST_DATABASE_URL`；未提供时的 skip 不算通过。2026-10-15 在维护者 macOS 15.3 arm64 / Go 1.27.2 / PostgreSQL 18.6 实际执行，3 个顶层测试、4 个子场景全部通过，零 skip，race 包耗时 2.427 秒，exit=0；`go vet -mod=vendor ./runtime` 通过。清理后夹具数据库、角色及连接均为 0。
+
+此测试的回复丢失由 HTTP 成功返回后主动丢弃回调结果模拟，不是 TCP 丢包或独立 Worker 重试。归档失败场景实际停在 `failed/not_waiting`，未覆盖 `archive_unconfirmed` 原因。没有执行官方 Node/独立 Worker/实际 Storage、真实供应商、浏览器或 Windows 验收，也没有实现新的通用续跑策略；生产代码、固定引擎及已安装 Runtime 均未改变。
