@@ -80,3 +80,13 @@ Windows 正式安装以 [集成计划](https://github.com/euler-gaozl/agent-os/b
 定向入口为 `go test -mod=vendor -race -count=1 ./runtime -run '^TestTelemetryOwnerHTTP' -timeout 90s`，需要显式提供 `TEST_DATABASE_URL`；未提供时按既有夹具跳过，不能记为数据库验收通过。自然到期测试约需 30 秒。
 
 2026-10-15 维护者 macOS 15.3/arm64 使用 Go 1.27.2、真实隔离 PostgreSQL 18.6 运行上述两项，race 检查通过、零跳过，包耗时 31.795 秒；自然租约场景 30.15 秒。`go vet ./runtime` 和 `go build ./...`（均 `-mod=vendor`）通过。证据位于本机 `local/evidence/macos-telemetry-owner-20261015`，不代表真实 Telemetry/Langfuse 联调；Runtime 生产代码和已安装程序未改变。
+
+新增 `runtime/notes_native_test.go` 将笔记修订/撤回的 native-v4 Owner 组合留在本仓。测试通过正常 Submit/Claim 创建任务，用 Owner 迁移后的 Runtime/Worker NOLOGIN/SET ROLE 连接池执行真实 PostgreSQL 事务；每个任务使用独立内存归档和合成 native 模型回执建立计划，不改引擎、任务快照、租约或笔记 SQL 状态来促成恢复。
+
+生命周期场景检查带未来 `valid_until` 的修订先可用、自然过期后不让旧版本重新生效；修订已提交但回复丢失后，经正常 Heartbeat 和自然到期 Claim 取得新 fence，重放模型/工具回执保持当时的有效视图，新 `document_read` 则显示当前已过期。随后显式续订和撤回，核对原文、来源、metadata、版本链、操作审计、完成回执及旧 fence/篡改重放拒绝。撤回后的新修订是已完成的 conflict，不能隐式复活。
+
+并发场景让两个同 scope 的不同 native 任务分别执行 revise/revise 和 revise/retire；只持锁的事务与 `pg_blocking_pids` 证明两方实际等待同一根锁，再释放竞争。必须恰好一方修改，另一方收到 `receipt.committed=true` 的明确 conflict；回放两方都不再调用效果或增加文档、审计、回执。测试不把“一个 goroutine 报错”当成已知冲突验收。
+
+定向入口：`go test -mod=vendor -race -count=1 ./runtime -run '^TestNativeNote(LifecycleReplyLossExpiryAndRetirement|ConcurrentHeadConflicts)$' -timeout 120s`。需要显式提供 `TEST_DATABASE_URL`；未提供时按既有夹具跳过，不能记为数据库通过。两个顶层测试，其中并发测试有两个子场景；自然有效期等待约 8 秒。2026-10-15 在独立 macOS 15.3 arm64 / Go 1.27.2 / PostgreSQL 18.6 上实际执行：2 个顶层测试、2 个并发子场景全部通过，零 skip，race 包耗时 10.533 秒，命令 exit=0；`go vet -mod=vendor ./runtime` 也通过。详细版本、故障范围及清理证据归主仓本次 Mac 增量记录。
+
+这是 Owner/native-v4 协议及真实 PostgreSQL 事务覆盖；合成模型 usage 不是供应商消耗或费用，内存归档不是实际 Storage 持久化，SET ROLE 不是独立账号登录。没有执行官方 Harness/独立 Worker 进程、管理浏览器或 Windows 验收。旧生命周期、权限、历史分叉及集成故障覆盖继续保留，不能据此关闭完整 W09/P2.5。
