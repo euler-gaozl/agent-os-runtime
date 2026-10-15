@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/euler-gaozl/agent-os-runtime/internal/runstate"
 	"github.com/euler-gaozl/agent-os-sdk/servicehttp"
 	"io"
 	"net/http"
@@ -414,12 +415,11 @@ func (s *Server) runtimeRoutes(mux *http.ServeMux) {
 		return nil
 	}))
 	mux.HandleFunc("POST /v1/runs/{id}/resume", wrap(func(w http.ResponseWriter, r *http.Request) error {
-		tag, e := s.Store.DB.Exec(r.Context(), "UPDATE runs SET status='queued',owner='',lease_until=NULL,updated_at=now() WHERE id=$1 AND status='failed' AND NOT cancel_requested", r.PathValue("id"))
-		if e != nil {
+		if e := s.Store.ResumeFailedLegacy(r.Context(), r.PathValue("id")); e != nil {
+			if errors.Is(e, runstate.ErrExplicitContinuationNeeded) {
+				return stateError(409, "explicit_continuation_request_required")
+			}
 			return e
-		}
-		if tag.RowsAffected() != 1 {
-			return errors.New("only failed, non-cancelled runs may resume; unknown calls require reconciliation")
 		}
 		jsonResponse(w, 202, map[string]bool{"queued": true})
 		return nil

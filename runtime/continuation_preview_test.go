@@ -268,9 +268,10 @@ func TestContinuationPreviewHTTPReadOnlyAndAuth(t *testing.T) {
 	for _, query := range []string{"?force=1", "?budget=", "?force=1&force=1", "?=", "?x", "?%zz"} {
 		f.request(t, "control", "GET", f.path()+query, 400)
 	}
-	for _, method := range []string{"POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} {
+	for _, method := range []string{"PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} {
 		f.request(t, "control", method, f.path(), 403)
 	}
+	f.request(t, "control", "POST", f.path(), 400) // New action requires its strict body.
 	f.request(t, "control", "GET", "/v1/runs/absent-continuation-fixture/continuation", 404)
 	afterUsage, err := f.n.fixture.store.Usage(f.n.fixture.ctx, f.n.run.ID)
 	nativeNotesNeed(t, err)
@@ -544,9 +545,9 @@ func TestContinuationPreviewConsistentReadSnapshot(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("preview never reached the deterministic read barrier")
 	}
-	// Existing explicit resume is only the concurrent test actor. The new GET
-	// neither calls it nor grants a user permission to do so.
-	f.request(t, "control", "POST", "/v1/runs/"+f.n.run.ID+"/resume", 202)
+	// A separate explicit action is the concurrent actor. The preview GET
+	// remains a repeatable-read observation with no continuation authority.
+	continuationActionQueue(t, f.n.fixture.ctx, f.server.Client(), f.server.URL, testToken+"control", f.n.run.ID)
 	next, err := f.n.engine.Claim(f.n.fixture.ctx, "continuation-concurrent-retry-"+ID(), time.Minute)
 	nativeNotesNeed(t, err)
 	if next.ID != f.n.run.ID || next.Fence != f.n.run.Fence+1 {

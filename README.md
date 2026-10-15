@@ -107,7 +107,7 @@ Windows 正式安装以 [集成计划](https://github.com/euler-gaozl/agent-os/b
 
 读取使用一个 10 秒有界 `REPEATABLE READ READ ONLY` 事务；元数据聚合不加载整族模型正文。Snapshot、最后冻结 input 和最后 call request 在 SQL CASE 中按 native 32 MiB 限额控制传输，receipt envelope 最多 64 MiB 且解码后的 body 仍按 native 32 MiB 校验；超限返回人工核对。JSONB 文本格式按保守字节界限判断，极限记录可能需要人工核对。任何后续执行接口都必须重新加锁核验当前状态和预算；不能把 observed_at/assessment 当授权或可靠费用估计。
 
-本预览只验证已保存的归档确认元数据，不读取实际 Storage 字节，不探测当前 Registry、工具治理、供应商或费用。旧 `/resume` 语义保持不变，Console/Futures 尚未接入此接口；自动接续、带幂等回执的显式动作、配置变更后的新任务承接和 UI 验收仍未实现。此处实现说明与下面实际验证结果应分开记录，不能把可编译候选记作真实业务验收。
+本预览只验证已保存的归档确认元数据，不读取实际 Storage 字节，不探测当前 Registry、工具治理、供应商或费用。在只读预览提交时，旧 `/resume` 语义保持不变，Console/Futures 尚未接入；显式动作及 UI 的后续源码进展见下节。预览本身仍不执行续跑，自动接续、配置变更后的新任务承接和完整 UI 验收仍未完成。此处实现说明与下面实际验证结果应分开记录，不能把可编译候选记作真实业务验收。
 
 定向入口：`go test -mod=vendor -race -count=1 -timeout 180s ./runtime -run '^(TestContinuationPreview|TestRuntimePeerBoundaries$)'`，必须提供本机隔离的 `TEST_DATABASE_URL`。2026-10-15 在维护者 macOS 15.3 arm64 / Go 1.27.2 / PostgreSQL 18.6 上实际执行：6 个新增顶层测试及 1 个既有身份策略测试、17 个子场景全部通过，0 fail/skip，race 包完成事件耗时 4.327 秒，命令 exit=0；`go vet -mod=vendor ./...` 与 `go build -mod=vendor ./...` 均 exit=0。
 
@@ -123,10 +123,35 @@ native-v4 的 BeginModel 在运行行锁内、已完成回执缓存返回之后�
 
 2026-10-15 独立 Mac（macOS 15.3 / arm64，Go 1.27.2，隔离 PostgreSQL 18.6）用正常 API、内存归档和合成回执复现了两个旧代码反例，并验证修复、成功缓存重放及同修订重试；相邻 native、预算、约束、取消和回执回归通过。它们不是供应商或业务验收。详细 Mac 证据见主仓维护知识库的后续增量。
 
-Worker 直接运行自己编译的固定 execution 模块，因此仅更新 Runtime HTTP 服务不能覆盖本检查。现有 rc.5 Worker 需显式更新不可变模块 pin、vendor 和实际二进制后再做联合验证；不得保持 rc.5 名称而静默修改 vendor。新 continuation 写动作及 UI 仍未实现。本段提交时记录的是执行库修复，Worker 部署结果须以独立后续证据为准。
+Worker 直接运行自己编译的固定 execution 模块，因此仅更新 Runtime HTTP 服务不能覆盖本检查。现有 rc.5 Worker 需显式更新不可变模块 pin、vendor 和实际二进制后再做联合验证；不得保持 rc.5 名称而静默修改 vendor。在该执行库修复提交时，新 continuation 写动作及 UI 仍未实现。本段提交时记录的是执行库修复，Worker 部署结果须以独立后续证据为准。
 
 新增可选的 `TestIndependentNativeWorkerRevisionGuard`（macOS/Linux）使用独立旧、新 Worker 二进制、固定官方 native-v4 Node runner、真实 Runtime HTTP 与隔离 PostgreSQL。显式提供 `TEST_DATABASE_URL`、`TEST_OLD_WORKER_BINARY`、`TEST_NEW_WORKER_BINARY`、新包绑定的 `TEST_NEW_WORKER_SHA256`/`TEST_NEW_WORKER_RUNTIME_VERSION`、`TEST_NATIVE_DSH_RUNNER` 和 `AGENTOS_NODE` 后运行 `go test -mod=vendor -race -count=1 -timeout 240s ./runtime -run '^TestIndependentNativeWorkerRevisionGuard$'`；未配置时的跳过不算通过。
 
 2026-10-15 在上述 Mac 环境实际执行，三个子场景全部通过、零跳过：旧 rc.5 在约束修订后发送两次；固定到 `1f6c4c29c62bac3ad6d674b7797a7410f373bf00` 的新 Worker 只保留首次 503、拒绝新增尝试；同修订的新 Worker 重试正常完成，首次未知用量仍保留。首次测试因 JSONB 读回改变对象键序而有两项原始字节比较失败，原记录保留；修订测试比较完整 JSON 值与冻结意图、调用及所有尝试，并另存原始字节哈希，没有更改生产代码或二进制来通过测试。
 
 模型为有界 loopback TLS 服务，归档为 HTTP 夹具，未调用真实供应商或实际 Storage。六个临时 Worker 正常退出，夹具数据库、角色和连接均已清理；十个既有服务在测试前后保持不变。此测试不证明 Windows、真实业务、完整发布包或后续安装成功，实际部署组合另记主仓 Mac 增量。
+
+## 显式接续请求与持久化回执
+
+control 可读取 `GET /v1/runs/{id}/continuation/request-context`，协议 `failed-run-continuation-action-context-v1`。只有本次判定为 `same_run_candidate` 时才返回 `failure_version`；它绑定任务、引擎、规则修订、fence、最后帧和当前 attempt，不是授权令牌或预算预留。原 `GET /continuation` 的 `failed-run-continuation-preview-v1`、`read_only=true` 和 `action_available=false` 保持不变。
+
+显式动作是 `POST /v1/runs/{id}/continuation`，请求仅包含 `request_id`、`expected_failure_version` 两个字符串。客户端必须在第一次发送前保存请求 ID 和请求体，在结果未知时保留同一对值。请求 ID 为 1–128 位 ASCII 字母、数字、`_` 或 `-`，版本为 64 位小写十六进制；JSON 最大 1 KiB，拒绝重复、未知、大小写别名、空值和多个 JSON 值。新管理接口要求命名的 control 身份；共享单 token 模式不授予这些动作。HEAD、查询参数及其他服务身份均拒绝。
+
+Owner 事务先锁请求 ID，先找旧回执；同 ID、同目标和版本重放原结果，同 ID、不同内容返回 409 `request_id_conflict`，不改变旧回执。新请求按父先顺序锁完整原生根任务族，允许正向处理最多 128 个任务；检测容量溢出可锁到第 129 个哨兵行，返回已记录的人工复核拒绝。读取并关闭全部行后取得模型预算锁 35，再在 READ COMMITTED 新语句快照中复用原只读判据。只允许完整 503 回执、原轮次内、原全族尝试预算未耗尽、规则与冻结请求一致且没有未知效果的失败根任务。子任务和历史引擎的动作返回明确人工复核；缺迁移表、SQL/连接故障或超时返回 503；缺失或不可信的业务证据则按原预览判据记录人工复核拒绝。
+
+成功在同一事务中把 failed 变为 queued、清空旧 owner/lease，并追加 `continuation_queued` 事件及回执，返回 202。预算、快照、协议、任务状态正文、轮次、既有调用及尝试均不改；不会在该请求中调用模型。确定拒绝返回持久化的 409。首次返回和重放均取数据库保存的同一 JSONB 响应，避免键序差异。回执协议 `failed-run-continuation-receipt-v1` 的 queued/rejected 描述历史决定，不描述任务当前状态。
+
+`GET /v1/runs/{id}/continuation/requests/{request_id}` 返回 200 和原回执正文，即使原 POST 为 409；404 仅说明本次未观察到匹配回执，不能证明并发提交没有成功。内部错误或 COMMIT 回复未知均为通用 503，不生成虚假的“已拒绝”回执。客户端应查询回执或使用同一请求 ID 和原请求体重发，不能换新 ID 猜测补偿。三个新处理器返回禁止缓存的响应，不回显冻结请求、供应商回执或 SQL。
+
+原生引擎的旧 POST `/resume` 现在锁内返回 409 `explicit_continuation_request_required`；历史引擎的旧行为保持。`/reconcile`、`/resume-source-state` 和执行协议不变。Console 同期源码加入原生任务的显式动作、浏览器请求指针及回执恢复；Futures 尚未接入此管理动作。实际迁移部署、浏览器交互及自动接续仍未完成，不能把这组 Owner 接口算作完整自动接续。
+
+新增 Owner 表 `run_continuation_receipts`：全局请求 ID 主键，任务外键，请求哈希、预期失败版本、原 HTTP 状态、最多 8 KiB 的 JSONB 回执及时间，另有任务查询索引。Runtime 仅被授予 SELECT/INSERT，Worker 无新增权限；普通迁移保持只扩展，不回收已有异常授权，不做 TTL 清理。表加入迁移和 readiness，也加入原 `runtimeTables` 权限退役清单；`workerAccess` 无此表，因此现有显式退役路径撤销并验证 Worker/foreign 无权限。没有新增退役执行或权限收缩步骤。回执保留且任务外键阻止绕开回执直接删除任务，后续存储生命周期需把该永久历史一并纳入。
+
+启用前必须确认所有能领取原生队列的 Worker 已含 `1f6c4c29c62bac3ad6d674b7797a7410f373bf00` 的新尝试规则守卫，完成 Owner 迁移、独立数据库/并发/权限测试和实际二进制验证。仅更新 Runtime HTTP 不会替换 Worker 内执行库。约束变化的线性化点仍是 BeginModel 锁内准入：准入前已提交的修订阻止旧意图新增尝试；准入后发生修订不能承诺消除已经在途的供应商请求，必须留存账单和回执。本切片不另改已明确升级的 Worker pin。
+
+2026-10-15 Mac 源码验证：macOS 15.3 arm64、Go 1.27.2、隔离 PostgreSQL 18.6。新增动作及关联预览/规则守卫定向测试 `-race` 通过 19 顶层、42 子场景，零跳过；其中新增 Owner/HTTP/权限事务组为 7 顶层、11 子场景。正常提交/领取/失败构造覆盖最后轮次重试、旧效果不重复、丢 HTTP 回复、同/不同 ID 竞争、取消、约束、Claim、锁超时、回滚、族预算和只读表摘要。没有用 SQL 改状态或租约制造成功。
+
+独立编译的旧/新 Worker、固定官方 Node Harness、实际 Runtime HTTP/PG 与合成 TLS 模型夹具通过 1 顶层、3 子场景：旧 pin 在约束变更后仍有 2 次请求，新 pin 仅 1 次；约束不变时新 pin 合法重试并完成，共 2 次。此处动作先在 R1 排队，再改 R2 后启动第二进程。完整请求按 JSON 语义与冻结意图/每次账本绑定，原始字节差异仍保留。实际供应商调用为 0；这不是丢 PostgreSQL COMMIT 回复、真实供应商、业务研究质量或浏览器验收。安装中的 Runtime HTTP、现存任务与数据库尚未切换。
+
+
+同轮扩大回归因新增迁移/权限表与旧管理入口变化而执行一次：Runtime 全包测试选择 `^Test`，112 顶层、195 子场景通过，27 项按各自配置条件明确跳过，零失败；其中独立 Worker 的 3 场景已在上述单独配置的运行中通过，不能把剩余专项跳过算通过。internal/runstate 的离线纯测试、全模块 vet/build 也通过。10 个现有实例的 PID、记录、二进制及配置哈希与基线完全一致；临时数据库、角色、连接均为 0，6 个夹具 Worker PID 已退出。

@@ -14,11 +14,12 @@ import (
 // These are Owner/public-execution tests with real PostgreSQL transactions,
 // synthetic model receipts and memory archives. No provider or Node runs.
 // All state transitions use APIs; SQL below only reads evidence. The existing
-// native /resume endpoint is a test actor, not the proposed continuation API.
+// explicit continuation API queues failed 503 attempts; nonfailed takeover uses
+// normal Heartbeat plus natural lease expiry.
 func nativeRevisionReclaim(t *testing.T, f *continuationFixture, revise bool) {
 	t.Helper()
 	old := f.n.run
-	f.request(t, "control", "POST", "/v1/runs/"+old.ID+"/resume", 202)
+	continuationActionQueue(t, f.n.fixture.ctx, f.server.Client(), f.server.URL, testToken+"control", old.ID)
 	if revise {
 		nativeNotesNeed(t, f.n.fixture.store.Constraints(f.n.fixture.ctx, old.ID, []string{"synthetic revised observation period"}))
 	}
@@ -31,6 +32,35 @@ func nativeRevisionReclaim(t *testing.T, f *continuationFixture, revise bool) {
 		t.Fatal("normal Constraints did not advance the run revision")
 	}
 	next.Step = 0 // Worker.driveDSH resets its in-memory replay counter, not SQL.
+	f.n.run = next
+}
+
+// An unsent intent or completed cache is not a failed-503 action candidate.
+// Keep the normal running checkpoint, shorten its lease through Heartbeat and
+// wait for actual database time to expire it; never UPDATE lease/status in SQL.
+func nativeRevisionExpireClaim(t *testing.T, f *continuationFixture, revise bool) {
+	t.Helper()
+	old := f.n.run
+	current, err := f.n.fixture.store.Run(f.n.fixture.ctx, old.ID)
+	nativeNotesNeed(t, err)
+	if current.Status != "running" {
+		t.Fatal("lease takeover requires the original running checkpoint")
+	}
+	if revise {
+		nativeNotesNeed(t, f.n.fixture.store.Constraints(f.n.fixture.ctx, old.ID, []string{"synthetic revised observation period"}))
+	}
+	nativeNotesNeed(t, f.n.engine.Heartbeat(f.n.fixture.ctx, old, 250*time.Millisecond))
+	nativeNotesWait(t, f.n.fixture.ctx, func() (bool, error) {
+		var expired bool
+		err := f.n.fixture.db.QueryRow(f.n.fixture.ctx, "SELECT lease_until<clock_timestamp() FROM runs WHERE id=$1", old.ID).Scan(&expired)
+		return expired, err
+	})
+	next, err := f.n.engine.Claim(f.n.fixture.ctx, "native-revision-takeover-"+ID(), time.Minute)
+	nativeNotesNeed(t, err)
+	if next.ID != old.ID || next.Fence != old.Fence+1 || next.Owner == old.Owner || (revise && next.RuleRevision <= old.RuleRevision) {
+		t.Fatal("natural lease takeover did not preserve the changed revision and advance owner/fence")
+	}
+	next.Step = 0
 	f.n.run = next
 }
 
@@ -95,7 +125,6 @@ func TestNativeAttemptRevisionRejectsUnsentIntent(t *testing.T) {
 	if !errors.Is(err, interrupted) {
 		t.Fatal("unsent fixture did not stop at the intended callback boundary")
 	}
-	nativeNotesNeed(t, f.n.engine.CheckpointFailure(f.n.fixture.ctx, f.n.run, err))
 	var archived bool
 	nativeNotesNeed(t, f.n.fixture.db.QueryRow(f.n.fixture.ctx, `SELECT EXISTS(SELECT 1 FROM harness_exchanges e JOIN harness_archives a USING(run_id,seq) WHERE e.run_id=$1 AND e.seq=1 AND e.method='model' AND e.response IS NULL AND a.manifest_hash<>'')`, f.n.run.ID).Scan(&archived))
 	u, err := f.n.fixture.store.Usage(f.n.fixture.ctx, f.n.run.ID)
@@ -103,7 +132,7 @@ func TestNativeAttemptRevisionRejectsUnsentIntent(t *testing.T) {
 	if !archived || u.Attempts != 0 || f.n.modelCalls.Load() != 0 {
 		t.Fatal("unsent fixture lacks an archived intent with zero attempts")
 	}
-	nativeRevisionReclaim(t, f, true)
+	nativeRevisionExpireClaim(t, f, true)
 	nativeRevisionReject(t, f, frame, 0)
 }
 
@@ -123,13 +152,12 @@ func TestNativeAttemptRevisionCompletedCacheCanFreezeAndReplay(t *testing.T) {
 	if !errors.Is(err, lost) {
 		t.Fatal("completed-cache fixture did not discard the callback result")
 	}
-	nativeNotesNeed(t, f.n.engine.CheckpointFailure(f.n.fixture.ctx, f.n.run, err))
 	var pending bool
 	nativeNotesNeed(t, f.n.fixture.db.QueryRow(f.n.fixture.ctx, `SELECT e.response IS NULL AND c.status='completed' FROM harness_exchanges e JOIN calls c ON c.id=e.run_id||'/dsh/'||e.seq::text WHERE e.run_id=$1 AND e.seq=1`, f.n.run.ID).Scan(&pending))
 	if !pending {
 		t.Fatal("successful receipt must exist before the model outcome is frozen")
 	}
-	nativeRevisionReclaim(t, f, true)
+	nativeRevisionExpireClaim(t, f, true)
 	before := nativeRevisionLedger(t, f)
 	callbacks := 0
 	effects = f.n.effects(nil)

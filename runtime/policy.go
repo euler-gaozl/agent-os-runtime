@@ -5,9 +5,23 @@ import "strings"
 // Authorize preserves the per-service HTTP boundary; owning a Worker token
 // never permits bypassing ToolHub governance through direct Runtime invocation.
 func Authorize(caller, method, path string) bool {
-	// The new read-only management projection is not a generic peer run read.
-	if strings.HasSuffix(path, "/continuation") {
-		return caller == "control" && method == "GET" && strings.HasPrefix(path, "/v1/runs/")
+	// URL.Path is already decoded by the identity middleware. An escaped slash
+	// inside ServeMux's {id} must not evade this guard and reach peer run grants.
+	if strings.HasSuffix(path, "/continuation") || strings.Contains(path, "/continuation/") {
+		if caller != "control" || !strings.HasPrefix(path, "/v1/runs/") {
+			return false
+		}
+		if strings.HasSuffix(path, "/continuation") {
+			return method == "GET" || method == "POST"
+		}
+		if strings.HasSuffix(path, "/continuation/request-context") {
+			return method == "GET"
+		}
+		if at := strings.LastIndex(path, "/continuation/requests/"); at >= 0 {
+			id := path[at+len("/continuation/requests/"):]
+			return method == "GET" && id != "" && !strings.Contains(id, "/")
+		}
+		return false
 	}
 	if path == "/v1/receipt-projections" {
 		return method == "GET" && (caller == "runtime" || caller == "control")

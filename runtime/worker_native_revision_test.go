@@ -346,10 +346,12 @@ func nativeRevisionProcessCase(t *testing.T, binary, runner, node string, revise
 			t.Fatal("fixture management API rejected operation", path, resp.StatusCode)
 		}
 	}
+	// Admit under the original failed generation first, then change constraints
+	// before the second Worker starts: this preserves the actual pinned-worker gap.
+	continuationActionQueue(t, ctx, server.Client(), server.URL, controlToken, id)
 	if revise {
 		request("/constraints", JSON(map[string]any{"values": []string{"synthetic-revised-period"}}), 200)
 	}
-	request("/resume", nil, 202)
 	config["INSTANCE_ID"] = "native-revision-second"
 	second := nativeRevisionStart(t, binary, config, idle)
 	result := wait(second, r.Fence+1)
