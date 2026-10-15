@@ -74,3 +74,9 @@ Worker 新账号只访问六张执行表和事件序列，不读写工作状态�
 新增 Mac 原生故障测试 `runtime/disk_full_darwin_test.go`，仅由集成仓库的有界卷控制器显式启用。它在新 PostgreSQL 集群中通过 Owner 迁移与 NOLOGIN/SET ROLE 角色池，核对笔记及 native 模型回执在真实 ENOSPC 下的原子性、同 PGDATA 恢复前留存和自然 fence 接管；模型为合成回执，归档为内存夹具，没有独立 Runtime/Worker/Node/Storage 进程。执行版本、首轮失败、实际结果与清理见 [Mac Owner 故障记录](https://github.com/euler-gaozl/agent-os/blob/feat/end-to-end-delivery/docs/runtime-enospc-macos-20261015.md)。此切片不删除旧覆盖，不证明独立登录、Compact、完整生命周期、Windows 或全平台资源验收。
 
 Windows 正式安装以 [集成计划](https://github.com/euler-gaozl/agent-os/blob/main/docs/windows-single-machine-plan.md) 为准。当前仍需修复真实研究中的上下文拒绝、预算及输出上限问题，完成内存边界、UI、剩余权限退役和最终故障验收。容量与跨主机高可用尚未验收，Actions 日常关闭。
+
+新增 `runtime/telemetry_delivery_test.go` 将事件投递的 Runtime Owner 覆盖留在本仓：使用新建隔离 PostgreSQL 数据库、Owner 迁移与 NOLOGIN/SET ROLE 的 Runtime 角色，经真实 loopback HTTP 和正式服务身份策略，检查低序号事件晚提交不会漏投、活跃租约不被抢占、原有 30 秒租约自然到期后 fence 接管、旧确认拒绝、整批确认原子性及重复确认幂等。返回只含事件身份、类型、时间和 fence，不导出 payload；原事件内容始终保留。测试不 SQL 改写租约，不导入 Telemetry 实现，也不验证其 inbox、导出器、真实收集端或独立账号登录；旧集成覆盖在对应验收完成前继续保留。
+
+定向入口为 `go test -mod=vendor -race -count=1 ./runtime -run '^TestTelemetryOwnerHTTP' -timeout 90s`，需要显式提供 `TEST_DATABASE_URL`；未提供时按既有夹具跳过，不能记为数据库验收通过。自然到期测试约需 30 秒。
+
+2026-10-15 维护者 macOS 15.3/arm64 使用 Go 1.27.2、真实隔离 PostgreSQL 18.6 运行上述两项，race 检查通过、零跳过，包耗时 31.795 秒；自然租约场景 30.15 秒。`go vet ./runtime` 和 `go build ./...`（均 `-mod=vendor`）通过。证据位于本机 `local/evidence/macos-telemetry-owner-20261015`，不代表真实 Telemetry/Langfuse 联调；Runtime 生产代码和已安装程序未改变。
