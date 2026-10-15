@@ -71,4 +71,6 @@ Worker 新账号只访问六张执行表和事件序列，不读写工作状态�
 
 `TEST_DATABASE_URL` 指向可创建隔离夹具的测试连接；旧/新 Worker 可通过 `TEST_OLD_WORKER_BINARY`、`TEST_NEW_WORKER_BINARY`、对应 DSH runner 与 `AGENTOS_NODE` 执行可选接力测试。详情、原始失败、通过数与跳过项保留在 [历史验收记录](docs/history/service-notes-20261014.en.md)。
 
+新增 Mac 原生故障测试 `runtime/disk_full_darwin_test.go`，仅由集成仓库的有界卷控制器显式启用。它在新 PostgreSQL 集群中通过 Owner 迁移与 NOLOGIN/SET ROLE 角色池，核对笔记及 native 模型回执在真实 ENOSPC 下的原子性、同 PGDATA 恢复前留存和自然 fence 接管；模型为合成回执，归档为内存夹具，没有独立 Runtime/Worker/Node/Storage 进程。执行版本、首轮失败、实际结果与清理见 [Mac Owner 故障记录](https://github.com/euler-gaozl/agent-os/blob/feat/end-to-end-delivery/docs/runtime-enospc-macos-20261015.md)。此切片不删除旧覆盖，不证明独立登录、Compact、完整生命周期、Windows 或全平台资源验收。
+
 Windows 正式安装以 [集成计划](https://github.com/euler-gaozl/agent-os/blob/main/docs/windows-single-machine-plan.md) 为准。当前仍需修复真实研究中的上下文拒绝、预算及输出上限问题，完成内存边界、UI、剩余权限退役和最终故障验收。容量与跨主机高可用尚未验收，Actions 日常关闭。
