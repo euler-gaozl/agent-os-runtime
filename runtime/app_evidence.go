@@ -20,6 +20,7 @@ type appEvidence struct {
 	OperationID      string    `json:"operation_id"`
 	RunID            string    `json:"run_id"`
 	DocumentID       string    `json:"document_id"`
+	OriginalHash     string    `json:"original_hash,omitempty"`
 	Title            string    `json:"title"`
 	Source           string    `json:"source"`
 	Kind             string    `json:"kind"`
@@ -53,6 +54,9 @@ const documentReceipt = `kind='tool' AND status='completed' AND request->>'name'
  AND jsonb_typeof(response#>'{document,content}')='string'`
 
 const evidenceColumns = `id,run_id,response#>>'{document,id}',
+ CASE WHEN jsonb_typeof(response#>'{document,metadata,original_hash}')='string'
+ AND response#>>'{document,metadata,original_hash}' ~ '^[a-f0-9]{64}$'
+ THEN response#>>'{document,metadata,original_hash}' ELSE '' END,
  left(coalesce(response#>>'{document,title}',''),200),left(coalesce(response#>>'{document,source}',''),2048),
  left(coalesce(response#>>'{document,kind}',''),40),left(response#>>'{document,content}',512),
  length(response#>>'{document,content}')>512,length(coalesce(response#>>'{document,source}',''))>2048,
@@ -61,7 +65,7 @@ const evidenceColumns = `id,run_id,response#>>'{document,id}',
 
 func scanAppEvidence(row pgx.Row, item *appEvidence, extra ...any) error {
 	var start, end string
-	args := []any{&item.OperationID, &item.RunID, &item.DocumentID, &item.Title, &item.Source, &item.Kind,
+	args := []any{&item.OperationID, &item.RunID, &item.DocumentID, &item.OriginalHash, &item.Title, &item.Source, &item.Kind,
 		&item.Preview, &item.PreviewTruncated, &item.SourceTruncated, &start, &end, &item.HasMore, &item.RecordedAt}
 	if err := row.Scan(append(args, extra...)...); err != nil {
 		return err

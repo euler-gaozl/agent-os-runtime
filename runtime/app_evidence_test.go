@@ -213,3 +213,46 @@ func TestAppEvidenceHTTPBoundary(t *testing.T) {
 		t.Fatal("raw receipt route became public")
 	}
 }
+
+func TestAppEvidenceExportsOnlyRetainedOriginalVersion(t *testing.T) {
+	s, root, _ := workingFixture(t)
+	ctx := context.Background()
+	bindEvidenceApp(t, s, root.ID, "futures")
+	for i, hash := range []any{strings.Repeat("a", 64), nil, "", strings.Repeat("B", 64), "private-not-a-hash", 123} {
+		op := fmt.Sprintf("%s/hash/%d", root.ID, i)
+		doc := fmt.Sprintf("hash-doc-%d", i)
+		appEvidenceFixture(t, s, root.ID, op, doc, "completed", "tool", "document_read", "甲🙂乙", time.Now())
+		// Match the real Knowledge response shape. The top-level trap and other
+		// metadata must never become the authority or leak through this projection.
+		if _, err := s.DB.Exec(ctx, `UPDATE calls SET response=jsonb_set(jsonb_set(response,'{document,metadata,original_hash}',$2::jsonb),'{document,original_hash}',to_jsonb($3::text)) WHERE id=$1`, op, JSON(hash), strings.Repeat("f", 64)); err != nil {
+			t.Fatal(err)
+		}
+		page, err := s.readAppEvidence(ctx, "futures", root.ID, doc, "", 8)
+		if err != nil || len(page.Items) != 1 {
+			t.Fatal(page, err)
+		}
+		part, err := s.readAppEvidenceText(ctx, "futures", root.ID, op, 0, 1, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := ""
+		if i == 0 {
+			want = strings.Repeat("a", 64)
+		}
+		if page.Items[0].OriginalHash != want || part.OriginalHash != want {
+			t.Fatal("wrong retained original version", i)
+		}
+		b, _ := json.Marshal(part)
+		if strings.Contains(string(b), "PRIVATE_") {
+			t.Fatal("metadata leaked")
+		}
+		if i == 0 {
+			version := part.Version
+			if _, err := s.DB.Exec(ctx, `UPDATE calls SET response=jsonb_set(response,'{document,metadata,original_hash}',to_jsonb($2::text)) WHERE id=$1`, op, strings.Repeat("b", 64)); err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.readAppEvidenceText(ctx, "futures", root.ID, op, 1, 1, version)
+			requireStateStatus(t, err, 409)
+		}
+	}
+}
