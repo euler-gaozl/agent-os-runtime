@@ -1,6 +1,10 @@
 # 回执引用交付 final-v5 候选
 
-2026-10-17：Owner 事务实现及本机隔离 PostgreSQL 检查通过，**尚未接入独立 Worker、安装或启用**。固定 SDK `v0.1.0-rc.4`，使用标准 Go 模块下载和 vendor；不依赖相邻源码或 local replace。当前正式任务仍按原固定引擎执行。
+2026-10-17：Owner 事务实现、本机隔离 PostgreSQL 及独立 Worker 完整包联调通过，**尚未正式安装或启用**。固定 SDK `v0.1.0-rc.4`，使用标准 Go 模块下载和 vendor；不依赖相邻源码或 local replace。当前正式任务仍按原固定引擎执行。
+
+Worker `c828bbccbb9903ff20c47e6b0e5201124d810f2b` 固定本服务 execution `7805a48` 与 Harness `696c019`。`TestIndependentFinalWorkerOriginalAndRecovery` 启动独立 Worker exe、真实 Node/DSH、Runtime HTTP 和受限 PostgreSQL，验证 312,021 字节 Unicode/CRLF/尾空白原文、选择后强杀、结束事件落盘后强杀、选择/完成 SQL 失败后的显式恢复、取消和供应商半包。7 个新场景及旧 native-v4 的 6 个回归通过，零测试跳过；以实际搬迁完整包复验，原包目录不存在。正常与恢复场景均两次合成模型请求、一次检查，同原文摘要及唯一完成事件。
+
+该联调的供应商、检查工具和归档服务为明确 HTTP 夹具。接管测试只对测试任务手动缩短租约，没有证明真实租约等待时长、付费供应商或正式 Storage。独立评审修复了结果落盘处的测试注入定位，未发现新的集成阻断；独立 Agent 未运行 PostgreSQL。证据由集成仓 Windows 记录和本机 `ops/final-worker-joint.path` 索引。
 
 ## 保证与边界
 
