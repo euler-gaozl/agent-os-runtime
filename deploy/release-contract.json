@@ -1,6 +1,7 @@
 {
   "format": 1,
   "role": "runtime",
+  "continuation_management": {"format": 1, "provides": "failed-run-continuation-v1", "requires": "native-model-revision-guard-v1"},
   "schema": "public",
   "migration_owner": "runtime",
   "backward_compatible": true,
