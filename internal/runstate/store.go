@@ -278,6 +278,13 @@ func (s *Store) Cancel(ctx context.Context, id string) error {
 		return e
 	}
 	defer tx.Rollback(ctx)
+	// Cancellation may arrive while another transaction holds the run row.
+	// Wait long enough for a normal step transaction instead of surfacing a
+	// spurious 504 that leaves the run uncancelled. The connection-wide
+	// statement_timeout is 15s; this transaction overrides it.
+	if _, e = tx.Exec(ctx, "SET LOCAL statement_timeout='60s'; SET LOCAL lock_timeout='60s'"); e != nil {
+		return e
+	}
 	ids, e := LockFamily(ctx, tx, id)
 	if e != nil {
 		return e
