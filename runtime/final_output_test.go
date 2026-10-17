@@ -19,9 +19,13 @@ type finalFixture struct {
 	selectValue                 any
 }
 
-func finalSetup(t *testing.T) *finalFixture {
+func finalSetup(t *testing.T, versions ...string) *finalFixture {
 	t.Helper()
-	f := sourceSetupVersion(t, EngineDSHFinal)
+	version := EngineDSHFinal
+	if len(versions) == 1 {
+		version = versions[0]
+	}
+	f := sourceSetupVersion(t, version)
 	f.r.Snapshot = nativeSnapshot()
 	f.r.Snapshot.Agent.FinalOutput = &contracts.FinalOutputPolicy{Protocol: contracts.FinalOutputProtocol, Tool: "mcp_fixture_check", InputField: "draft", ReadyPath: []string{"structuredContent", "ready"}}
 	f.r.Snapshot.Connectors = []Connector{{Name: "fixture", Tools: []Tool{{Name: "check", InputSchema: JSON(map[string]any{"type": "object", "properties": map[string]any{"draft": map[string]string{"type": "string"}}, "required": []string{"draft"}})}}}}

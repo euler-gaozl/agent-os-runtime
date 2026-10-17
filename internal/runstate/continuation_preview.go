@@ -183,7 +183,7 @@ func readFailedContinuationPreview(ctx context.Context, tx pgx.Tx, id string) (C
 	}
 	// v5 resumes the frozen policy; never infer a replacement tool or readiness
 	// path from the latest Registry state. Legacy v4 assessments stay unchanged.
-	if r.Engine == EngineDSHFinal && (!hasFinalOutput(r.Snapshot) || validateFinalSnapshot(r.Snapshot, r.Engine) != nil) {
+	if IsFinalEngine(r.Engine) && ((r.Engine == EngineDSHFinal && !hasFinalOutput(r.Snapshot)) || validateFinalSnapshot(r.Snapshot, r.Engine) != nil) {
 		continuationClassify(&v, "manual_review", "invalid_frozen_configuration")
 		return v, nil
 	}

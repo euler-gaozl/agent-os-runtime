@@ -46,7 +46,7 @@ func canonicalHash(b []byte) string {
 
 func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) (any, bool, error) {
 	if f.Method == "final_output_select" || f.Method == "finish_ref" {
-		if r.Engine != EngineDSHFinal {
+		if !IsFinalEngine(r.Engine) {
 			return nil, false, errors.New("receipt finalization requires final-v5")
 		}
 	}
@@ -63,7 +63,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	if fresh.Engine != r.Engine {
 		return nil, false, errors.New("execution engine differs from the immutable run")
 	}
-	if fresh.Engine == EngineDSHFinal && fresh.Snapshot.Agent.FinalOutput != nil && f.Method == "finish" {
+	if IsFinalEngine(fresh.Engine) && fresh.Snapshot.Agent.FinalOutput != nil && f.Method == "finish" {
 		return nil, false, errors.New("receipt finalization cannot fall back to text finish")
 	}
 	if fresh.Status == "completed" && f.Method == "finish_ref" {
@@ -138,12 +138,12 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		}
 	} else {
 		revision = r.RuleRevision
-		if f.Method == "working_state_update" || r.Engine == EngineDSHFinal && (f.Method == "tool" || f.Method == "final_output_select" || f.Method == "finish_ref") {
+		if f.Method == "working_state_update" || IsFinalEngine(r.Engine) && (f.Method == "tool" || f.Method == "final_output_select" || f.Method == "finish_ref") {
 			// Pin the originating model's rules, not refreshed rules at dispatch.
 			revision = r.State.PlanRevision
 		}
 		request = f.Params
-		if r.Engine == EngineDSHFinal && f.Method == "checkpoint" {
+		if IsFinalEngine(r.Engine) && f.Method == "checkpoint" {
 			// Freeze the projection with the first archive intent. A retry can
 			// regenerate session events; it must not replace committed evidence.
 			request = JSON(map[string]any{"finalization_events": finalEvents(f.Events)})
@@ -226,7 +226,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	switch f.Method {
 	case "checkpoint":
 		value = map[string]any{"persisted": true, "manifest_hash": r.State.HarnessArtifact}
-		if r.Engine == EngineDSHFinal {
+		if IsFinalEngine(r.Engine) {
 			var projection struct {
 				Events []finalEvent `json:"finalization_events"`
 			}
@@ -349,7 +349,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 				return nil, false, e
 			}
 			receipt := map[string]any{"operation_id": op, "committed": committed}
-			if r.Engine == EngineDSHFinal && committed && r.Snapshot.Agent.FinalOutput != nil && in.Name == r.Snapshot.Agent.FinalOutput.Tool {
+			if IsFinalEngine(r.Engine) && committed && r.Snapshot.Agent.FinalOutput != nil && in.Name == r.Snapshot.Agent.FinalOutput.Tool {
 				text, ready, valid := finalCandidateText(r.Snapshot.Agent.FinalOutput, in.Arguments, raw)
 				if valid {
 					receipt["final_output"] = map[string]any{"protocol": "receipt-field-v1", "sha256": Hash([]byte(text)), "ready": ready}

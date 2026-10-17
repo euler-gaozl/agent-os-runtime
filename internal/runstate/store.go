@@ -19,6 +19,7 @@ type Store struct {
 	BudgetEnabled   bool
 	NativeEnabled   bool
 	FinalEnabled    bool
+	GuardedEnabled  bool
 }
 type ArtifactWriter interface {
 	PutArtifact(context.Context, []byte, string, string) (string, error)
@@ -190,6 +191,9 @@ func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration) (R
 	if s.FinalEnabled {
 		engines = append(engines, EngineDSHFinal)
 	}
+	if s.GuardedEnabled {
+		engines = append(engines, EngineDSHGuarded)
+	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
 		return Run{}, e
@@ -245,7 +249,7 @@ func (s *Store) Save(ctx context.Context, r Run, status string) error {
 	if status == "completed" {
 		var revision int64
 		var referenceOnly bool
-		if e = tx.QueryRow(ctx, "SELECT rule_revision,engine=$2 AND COALESCE(snapshot#>'{agent,final_output}','null'::jsonb)<>'null'::jsonb FROM runs WHERE id=$1", r.ID, EngineDSHFinal).Scan(&revision, &referenceOnly); e != nil {
+		if e = tx.QueryRow(ctx, "SELECT rule_revision,engine=ANY($2) AND COALESCE(snapshot#>'{agent,final_output}','null'::jsonb)<>'null'::jsonb FROM runs WHERE id=$1", r.ID, []string{EngineDSHFinal, EngineDSHGuarded}).Scan(&revision, &referenceOnly); e != nil {
 			return e
 		}
 		if referenceOnly {
@@ -281,9 +285,9 @@ func (s *Store) Cancel(ctx context.Context, id string) error {
 	_, e = tx.Exec(ctx, `UPDATE runs r SET cancel_requested=true,status=CASE WHEN status IN('queued','waiting_children','failed')
  OR (status='waiting_unknown' AND engine=ANY($2)
  AND ((SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1) IN('working_state_read','working_state_update','final_output_select','finish_ref')
- OR (engine=$3 AND (SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1)='checkpoint'))
+ OR (engine=ANY($3) AND (SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1)='checkpoint'))
  AND NOT EXISTS(SELECT 1 FROM calls c WHERE c.run_id=r.id AND c.status IN('inflight','unknown')))
- THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget, EngineDSHNative, EngineDSHFinal}, EngineDSHFinal)
+ THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget, EngineDSHNative, EngineDSHFinal, EngineDSHGuarded}, []string{EngineDSHFinal, EngineDSHGuarded})
 	if e != nil {
 		return e
 	}

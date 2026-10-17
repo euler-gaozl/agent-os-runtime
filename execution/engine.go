@@ -19,10 +19,12 @@ const EngineDSHResident = runstate.EngineDSHResident
 const EngineDSHBudget = runstate.EngineDSHBudget
 const EngineDSHNative = runstate.EngineDSHNative
 const EngineDSHFinal = runstate.EngineDSHFinal
+const EngineDSHGuarded = runstate.EngineDSHGuarded
 const NativeRequestBytes = runstate.NativeRequestBytes
 const NativeResponseBytes = runstate.NativeResponseBytes
 
 func IsSourceEngine(engine string) bool { return runstate.IsSourceEngine(engine) }
+func IsFinalEngine(engine string) bool  { return runstate.IsFinalEngine(engine) }
 
 type Run = contracts.Run
 type Message = contracts.Message
@@ -98,6 +100,8 @@ func NewSourceVersions(db *pgxpool.Pool, archives ArtifactWriter, engines []stri
 			s.NativeEnabled = true
 		case EngineDSHFinal:
 			s.FinalEnabled = true
+		case EngineDSHGuarded:
+			s.GuardedEnabled = true
 		default:
 			return nil, errors.New("unsupported source engine")
 		}

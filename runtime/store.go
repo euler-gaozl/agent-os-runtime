@@ -61,5 +61,6 @@ const EngineDSHResident = runstate.EngineDSHResident
 const EngineDSHBudget = runstate.EngineDSHBudget
 const EngineDSHNative = runstate.EngineDSHNative
 const EngineDSHFinal = runstate.EngineDSHFinal
+const EngineDSHGuarded = runstate.EngineDSHGuarded
 
 func isSourceEngine(engine string) bool { return runstate.IsSourceEngine(engine) }

@@ -14,7 +14,7 @@ import (
 
 // Recovery of these methods never reconciles an unknown external effect.
 func IsFinalRecoveryMethod(engine, method string) bool {
-	if engine != EngineDSHFinal {
+	if !IsFinalEngine(engine) {
 		return false
 	}
 	switch method {
@@ -37,7 +37,7 @@ func hasFinalOutput(s Snapshot) bool {
 }
 func validateFinalSnapshot(s Snapshot, engine string) error {
 	if s.Agent.FinalOutput != nil {
-		if engine != EngineDSHFinal {
+		if !IsFinalEngine(engine) {
 			return errors.New("final output policy requires final-v5")
 		}
 		if err := s.Agent.FinalOutput.Validate(); err != nil {
@@ -306,12 +306,15 @@ func finalEndArchived(ctx context.Context, tx pgx.Tx, r Run, selection finalSele
 }
 
 func (s *Store) finalExchange(ctx context.Context, r *Run, f Frame, plan int64) (any, bool, error) {
+	if !IsFinalEngine(r.Engine) {
+		return nil, false, errors.New("final protocol requires a final-capable engine")
+	}
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return nil, false, err
 	}
 	defer tx.Rollback(ctx)
-	if err = LockRun(ctx, tx, r.ID, r.Owner, r.Fence, false, EngineDSHFinal); err != nil {
+	if err = LockRun(ctx, tx, r.ID, r.Owner, r.Fence, false, r.Engine); err != nil {
 		return nil, false, err
 	}
 	current, err := ScanRun(tx.QueryRow(ctx, "SELECT "+RunColumns+" FROM runs WHERE id=$1", r.ID))

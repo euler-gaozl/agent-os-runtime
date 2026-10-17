@@ -17,8 +17,10 @@ const EngineDSHResident = "dsh-source-639ed015-resident-v2"
 const EngineDSHBudget = "dsh-source-639ed015-budget-v3"
 const EngineDSHNative = "dsh-source-639ed015-native-v4"
 const EngineDSHFinal = "dsh-source-639ed015-final-v5"
+const EngineDSHGuarded = "dsh-source-639ed015-guarded-v6"
 
-func IsNativeEngine(engine string) bool { return engine == EngineDSHNative || engine == EngineDSHFinal }
+func IsFinalEngine(engine string) bool  { return engine == EngineDSHFinal || engine == EngineDSHGuarded }
+func IsNativeEngine(engine string) bool { return engine == EngineDSHNative || IsFinalEngine(engine) }
 
 func IsSourceEngine(engine string) bool {
 	return engine == EngineDSHSource || engine == EngineDSHResident || engine == EngineDSHBudget || IsNativeEngine(engine)
