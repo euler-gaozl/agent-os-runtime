@@ -29,7 +29,7 @@ resident-v2 是独立候选，需明确版本选择、匹配 Worker 编译 pin�
 
 ## 回执、证据与 MCP
 
-2026-10-17 新增 [final-v5 回执引用交付候选](docs/final-output-v5.md)：把原始送检字符串、完成状态和引用回执原子提交，避免最后一步抄写改稿；新引擎隔离旧协议。真实隔离 PostgreSQL 的 27 顶层 / 45 子场景通过，零 skip，独立 Worker/Harness 联合、资源登记与正式发布仍未完成，不能启用为日常引擎。
+2026-10-17 新增 [final-v5 回执引用交付候选](docs/final-output-v5.md)：把原始送检字符串、完成状态和引用回执原子提交，避免最后一步抄写改稿；新引擎隔离旧协议。Owner 事务、实际独立 Worker/Harness 联合及失败后的显式接续均已验证；源码通过不等于已安装，固定业务资源、受管发布兼容和实际业务验收仍须完成，不能提前启用为日常引擎。
 
 下述 v3/v4“候选/未安装”为早期记录；它们已在集成平台 Windows 安装。当前真实任务与已知质量缺陷见[集成研究记录](https://github.com/euler-gaozl/agent-os/blob/main/docs/maintainer/windows-research-20261017.md)。
 

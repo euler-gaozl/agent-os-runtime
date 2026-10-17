@@ -2,6 +2,12 @@
 
 2026-10-17：Owner 事务实现、本机隔离 PostgreSQL 及独立 Worker 完整包联调通过，**尚未正式安装或启用**。固定 SDK `v0.1.0-rc.4`，使用标准 Go 模块下载和 vendor；不依赖相邻源码或 local replace。当前正式任务仍按原固定引擎执行。
 
+后续已补齐 final-v5 模型 HTTP 503 的显式接续：沿用同一冻结任务、步骤/尝试预算、父优先家族锁、原生模型意图核验和永久接续回执。策略树必须仍有合法策略且工具绑定有效，不能用当前 Registry 替换旧快照；允许根无策略而子树有策略。取消、约束变化、预算耗尽、非 503 或半包响应不能获得重试许可。旧 native-v4 的评估规则保留，legacy resume 仍不能用于 v5。
+
+本轮真实隔离 PostgreSQL + 管理 HTTP 回归及实际搬迁 Worker 包联合，84 个测试事件通过、零 skip。补充整树策略丢失/合法子树策略及半包拒绝后，只重跑受影响的 v5 20 个事件，全部通过；内部 Owner 单元 13 项及全仓 vet、命令原生构建通过。新 model503 场景在检查工具执行后失败，停止第一个实际 Worker，再通过 HTTP 预览/POST/重复 POST/回执 GET 入队，由第二个 Worker 恢复并交付同一 312,021 字节原文：3 次模型请求、1 次检查、1 条入队回执/事件、1 条完成事件，保留原 503 尝试和 1 次未知用量。既有 native-v4 六场景回归仍通过。
+
+此场景证明失败后的显式接续和进程替换，不是执行中宕机接管；供应商、检查工具和归档为 HTTP 夹具。管理 Owner 方法变化没有改变 Worker execution 调用协议，联调继续使用已固定的 Worker `c828bbcc` 完整包及其 execution `7805a48`，未因管理方法而漂移 Worker 依赖。独立静态复核未发现 P1/P2，没有代跑数据库。私有证据 `ops/final-continuation.path`，首轮 `final-continuation-f5e32c87926a4bd9ac7fa9d31ad27729`、定向补验 `final-continuation-7e244422c6f445e39deb604afe9c2107`；隔离数据库已停止，未改正式库、调用付费模型或运行 Actions。
+
 Worker `c828bbccbb9903ff20c47e6b0e5201124d810f2b` 固定本服务 execution `7805a48` 与 Harness `696c019`。`TestIndependentFinalWorkerOriginalAndRecovery` 启动独立 Worker exe、真实 Node/DSH、Runtime HTTP 和受限 PostgreSQL，验证 312,021 字节 Unicode/CRLF/尾空白原文、选择后强杀、结束事件落盘后强杀、选择/完成 SQL 失败后的显式恢复、取消和供应商半包。7 个新场景及旧 native-v4 的 6 个回归通过，零测试跳过；以实际搬迁完整包复验，原包目录不存在。正常与恢复场景均两次合成模型请求、一次检查，同原文摘要及唯一完成事件。
 
 该联调的供应商、检查工具和归档服务为明确 HTTP 夹具。接管测试只对测试任务手动缩短租约，没有证明真实租约等待时长、付费供应商或正式 Storage。独立评审修复了结果落盘处的测试注入定位，未发现新的集成阻断；独立 Agent 未运行 PostgreSQL。证据由集成仓 Windows 记录和本机 `ops/final-worker-joint.path` 索引。
@@ -18,7 +24,7 @@ v5 checkpoint 在首次意图中冻结小型结束事件投影；原事件仍走
 
 `finish_ref` 在一次事务里保存原字符串、`completed` 状态、完成响应和引用事件。已提交但丢回复时返回原结果，不重复模型；旧 owner、取消、约束变化、旧选择和新模型步骤均不能误完成。普通 `finish` 和调用者篡改 Run 后的 `Save(completed)` 都受数据库冻结策略限制。
 
-内部 checkpoint/state/select/finish 交换出现普通数据库/归档错误时，真实 Worker 使用的 `CheckpointFailure` 将 v5 归入可核对的 `waiting_unknown`。现有 control source-recovery/resume 入口在锁内检查取消、未决外部调用及原始归档/暂存批次后恢复原交换；不会猜测外部工具是否执行。取消可正确收敛，完成后的迟到失败回报不会覆盖结果。其他 v5 模型失败的显式接续仍待集成，legacy resume 已明确拒绝 v5，不能绕过接续审计。
+内部 checkpoint/state/select/finish 交换出现普通数据库/归档错误时，真实 Worker 使用的 `CheckpointFailure` 将 v5 归入可核对的 `waiting_unknown`。现有 control source-recovery/resume 入口在锁内检查取消、未决外部调用及原始归档/暂存批次后恢复原交换；不会猜测外部工具是否执行。取消可正确收敛，完成后的迟到失败回报不会覆盖结果。v5 模型失败现通过上述明确回执判定的接续入口；legacy resume 已明确拒绝 v5，不能绕过接续审计。
 
 ## 本机证据
 
@@ -32,7 +38,7 @@ v5 checkpoint 在首次意图中冻结小型结束事件投影；原事件仍走
 
 ## 启用前仍需完成
 
-1. Worker 固定 execution 与 Harness v5；明确 init policy、引擎/发布能力和历史包保留。做真实独立进程联合故障测试。
-2. Registry、Console、Futures 等 Agent 读写路径采用新版 SDK，验证注册→读取→快照→Worker 不丢 `final_output`；业务检查器明确返回结构就绪字段。
-3. 补齐 v5 模型失败接续与管理 UI；建立受管升级/回滚门槛，不能仅设置新默认引擎。
+1. 已完成 Worker 固定 execution/Harness 与完整包联合、Registry 固定绑定校验、Console 策略编辑及 Futures 结构就绪。接下来用实际固定业务资源贯通注册→读取→快照→Worker；各域测试不自动等于整条已部署链路。
+2. v5 模型失败接续和 Console 管理入口源码已接通，浏览器流程与实际安装仍须验收。
+3. 建立受管升级/回滚门槛，包含新旧 Registry/Console 策略能力、全部 Worker 与 Runtime 的 final-v5 能力、未完成任务及接续回执保留；不能仅设置新默认引擎。
 4. 完成正式 Windows 发布与有界真实业务验收；内容错误、全平台剩余验收和一次统一 CI 保持开放。

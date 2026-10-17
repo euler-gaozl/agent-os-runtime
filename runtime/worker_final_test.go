@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/pem"
@@ -23,7 +24,7 @@ import (
 // and worker PostgreSQL roles. TLS supplier, checker and archive HTTP are fixtures.
 // These checks prove byte identity/recovery, not research content correctness.
 func TestIndependentFinalWorkerOriginalAndRecovery(t *testing.T) {
-	for _, mode := range []string{"original", "selection_kill", "result_kill", "select_sql", "finish_sql", "cancel", "partial"} {
+	for _, mode := range []string{"original", "selection_kill", "result_kill", "select_sql", "finish_sql", "cancel", "partial", "model503"} {
 		t.Run(mode, func(t *testing.T) { testFinalWorker(t, mode) })
 	}
 }
@@ -45,7 +46,7 @@ func testFinalWorker(t *testing.T, mode string) {
 	if e := s.ConfigureSubmissionEngine(EngineDSHFinal); e != nil {
 		t.Fatal(e)
 	}
-	server := httptest.NewServer((&Server{Store: s}).Handler(servicehttp.Config{Role: "runtime", Authorize: Authorize, Peers: map[string]string{"worker": servicehttp.TokenHash(token)}}))
+	server := httptest.NewServer((&Server{Store: s}).Handler(servicehttp.Config{Role: "runtime", Authorize: Authorize, Peers: map[string]string{"worker": servicehttp.TokenHash(token), "control": servicehttp.TokenHash(token + "control")}}))
 	defer server.Close()
 	draft := "中文🙂e\u0301\r\n" + strings.Repeat("checked actual17 / plan20\n", 12000) + "END  \n"
 	var generations, checks atomic.Int64
@@ -97,6 +98,15 @@ func testFinalWorker(t *testing.T, mode string) {
 			return
 		}
 		n := generations.Add(1)
+		if mode == "model503" {
+			if n == 2 {
+				jsonResponse(w, 503, map[string]any{"error": map[string]string{"message": "synthetic temporary failure after check"}})
+				return
+			}
+			if n > 2 {
+				n-- // Explicit retry of the second logical generation.
+			}
+		}
 		if mode == "partial" {
 			_, _ = w.Write([]byte(`{"choices":[`))
 			return
@@ -214,6 +224,7 @@ func testFinalWorker(t *testing.T, mode string) {
 	config := map[string]string{"DATABASE_URL": evidenceWorkerDSN(t, db, workerRole), "SERVICE_TOKEN": token, "SERVICE_PEERS": string(JSON(map[string]string{"worker": servicehttp.TokenHash(token)})), "RUNTIME_URL": server.URL, "REGISTRY_URL": server.URL, "TOOLHUB_URL": hub.URL, "STORAGE_URL": archive.server.URL, "AGENTOS_NODE": node, "DSH_FINAL_RUNNER": runner, "SSL_CERT_FILE": ca, "GODEBUG": "x509sslcertoverrideplatform=1", "LISTEN": "127.0.0.1:0", "INSTANCE_ID": "final-first", "DB_MAX_CONNS": "3"}
 	first, done := startEvidenceWorker(t, ctx, binary, config)
 	var result Run
+	var failedAttempt []byte
 	resumed := false
 	for {
 		result, e = s.Run(ctx, id)
@@ -257,6 +268,38 @@ func testFinalWorker(t *testing.T, mode string) {
 			resumed = true
 			continue
 		}
+		if !resumed && mode == "model503" && result.Status == "failed" {
+			// Stop the first actual process before queueing, so the management
+			// phase can be checked without racing a Worker claim/model attempt.
+			if e = first.Process.Kill(); e != nil {
+				t.Fatal(e)
+			}
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("failed Worker stop timeout")
+			}
+			if e = db.QueryRow(ctx, "SELECT to_jsonb(a) FROM model_attempts a JOIN calls c ON c.id=a.call_id WHERE c.run_id=$1 AND a.status='failed'", id).Scan(&failedAttempt); e != nil {
+				t.Fatal(e)
+			}
+			frozen := canonicalHash(JSON(result.Snapshot))
+			version := actionContext(t, ctx, server.Client(), server.URL, token+"control", id)
+			path := "/v1/runs/" + id + "/continuation"
+			request := actionBody("final-worker-retry", version)
+			accepted := actionCheck(t, actionHTTP(ctx, server.Client(), server.URL, token+"control", "POST", path, request), 202)
+			if !bytes.Equal(accepted, actionCheck(t, actionHTTP(ctx, server.Client(), server.URL, token+"control", "POST", path, request), 202)) ||
+				!bytes.Equal(accepted, actionCheck(t, actionHTTP(ctx, server.Client(), server.URL, token+"control", "GET", path+"/requests/final-worker-retry", nil), 200)) {
+				t.Fatal("explicit retry did not retain one stable receipt")
+			}
+			queued, err := s.Run(ctx, id)
+			if err != nil || queued.Status != "queued" || canonicalHash(JSON(queued.Snapshot)) != frozen || generations.Load() != 2 || checks.Load() != 1 {
+				t.Fatal("management changed policy or repeated an external effect", err)
+			}
+			config["INSTANCE_ID"] = "final-after-503"
+			_, done = startEvidenceWorker(t, ctx, binary, config)
+			resumed = true
+			continue
+		}
 		if result.Status == "completed" || result.Status == "failed" || result.Status == "waiting_unknown" || result.Status == "cancelled" {
 			break
 		}
@@ -276,6 +319,17 @@ func testFinalWorker(t *testing.T, mode string) {
 		if result.Status != "failed" || u.UnknownUsageAttempts != 1 || generations.Load() != 1 {
 			t.Fatal("partial response misclassified", result.Status, u)
 		}
+		path := "/v1/runs/" + id + "/continuation"
+		body := actionCheck(t, actionHTTP(ctx, server.Client(), server.URL, token+"control", "GET", path+"/request-context", nil), 200)
+		var preview struct {
+			Assessment string `json:"assessment"`
+			Reason     string `json:"reason"`
+		}
+		if json.Unmarshal(body, &preview) != nil || preview.Assessment != "manual_review" || preview.Reason != "failure_not_assessed" {
+			t.Fatal("partial response became eligible for continuation")
+		}
+		rejected := actionCheck(t, actionHTTP(ctx, server.Client(), server.URL, token+"control", "POST", path, actionBody("partial-must-not-retry", strings.Repeat("0", 64))), 409)
+		actionReceipt(t, rejected, "partial-must-not-retry", id, strings.Repeat("0", 64), "rejected", "failure_not_assessed")
 		return
 	}
 	if mode == "cancel" {
@@ -287,7 +341,19 @@ func testFinalWorker(t *testing.T, mode string) {
 	if result.Status != "completed" || result.State.Result != draft {
 		t.Fatal("checked original not delivered", result.Status, result.State.Error)
 	}
-	if generations.Load() != 2 || checks.Load() != 1 || u.Attempts != 2 || u.UnknownUsageAttempts != 0 {
+	wantRequests, wantUnknown := int64(2), int64(0)
+	if mode == "model503" {
+		wantRequests, wantUnknown = 3, 1
+		var retained []byte
+		if e = db.QueryRow(ctx, "SELECT to_jsonb(a) FROM model_attempts a JOIN calls c ON c.id=a.call_id WHERE c.run_id=$1 AND a.status='failed'", id).Scan(&retained); e != nil || !bytes.Equal(retained, failedAttempt) {
+			t.Fatal("old 503 attempt was overwritten", e)
+		}
+		var continuationReceipts, queueEvents int
+		if e = db.QueryRow(ctx, "SELECT (SELECT count(*) FROM run_continuation_receipts WHERE run_id=$1),(SELECT count(*) FROM events WHERE run_id=$1 AND kind='continuation_queued')", id).Scan(&continuationReceipts, &queueEvents); e != nil || continuationReceipts != 1 || queueEvents != 1 {
+			t.Fatal("duplicate continuation effects", e, continuationReceipts, queueEvents)
+		}
+	}
+	if generations.Load() != wantRequests || checks.Load() != 1 || int64(u.Attempts) != wantRequests || int64(u.UnknownUsageAttempts) != wantUnknown {
 		t.Fatal("recovery repeated effects", generations.Load(), checks.Load(), u)
 	}
 	if mode != "original" && (!resumed || result.Fence != 2) {
@@ -303,5 +369,5 @@ func testFinalWorker(t *testing.T, mode string) {
 	if receipts != 1 || pending != 0 {
 		t.Fatal("incomplete/duplicate durable completion", receipts, pending)
 	}
-	t.Logf("mode=%s bytes=%d sha256=%s fence=%d provider=2 checker=1; actual Worker/Node/Runtime HTTP/PG, fixture provider/checker/archive", mode, len(draft), Hash([]byte(draft)), result.Fence)
+	t.Logf("mode=%s bytes=%d sha256=%s fence=%d provider=%d checker=1 unknown_usage=%d; actual Worker/Node/Runtime HTTP/PG, fixture provider/checker/archive", mode, len(draft), Hash([]byte(draft)), result.Fence, generations.Load(), u.UnknownUsageAttempts)
 }

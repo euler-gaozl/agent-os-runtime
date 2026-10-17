@@ -157,7 +157,7 @@ func readFailedContinuationPreview(ctx context.Context, tx pgx.Tx, id string) (C
 		continuationClassify(&v, "blocked", "reconciliation_required")
 		return v, nil
 	}
-	if r.Engine != EngineDSHNative {
+	if !IsNativeEngine(r.Engine) {
 		continuationClassify(&v, "manual_review", "engine_not_assessed")
 		return v, nil
 	}
@@ -178,6 +178,12 @@ func readFailedContinuationPreview(ctx context.Context, tx pgx.Tx, id string) (C
 		return v, nil
 	}
 	if json.Unmarshal(snapshot, &r.Snapshot) != nil || !validContinuationBounds(r.Snapshot, 0) || ValidateNativeSnapshot(r.Snapshot) != nil {
+		continuationClassify(&v, "manual_review", "invalid_frozen_configuration")
+		return v, nil
+	}
+	// v5 resumes the frozen policy; never infer a replacement tool or readiness
+	// path from the latest Registry state. Legacy v4 assessments stay unchanged.
+	if r.Engine == EngineDSHFinal && (!hasFinalOutput(r.Snapshot) || validateFinalSnapshot(r.Snapshot, r.Engine) != nil) {
 		continuationClassify(&v, "manual_review", "invalid_frozen_configuration")
 		return v, nil
 	}

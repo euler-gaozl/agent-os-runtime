@@ -243,7 +243,13 @@ func TestContinuationActionNormalReplayAndBudget(t *testing.T) {
 }
 
 func TestContinuationActionLostReplyAndFailureGenerations(t *testing.T) {
-	f := continuationSetup(t, 1, 3, nil)
+	for _, engine := range []string{EngineDSHNative, EngineDSHFinal} {
+		t.Run(engine, func(t *testing.T) { testContinuationLostReply(t, engine) })
+	}
+}
+
+func testContinuationLostReply(t *testing.T, engine string) {
+	f := continuationSetupVersion(t, engine, 1, 3, nil)
 	f.failModel(t, 1, 503)
 	va := actionVersion(t, f)
 	actionRequest(t, f, "GET", f.path()+"/requests/lost", nil, 404)

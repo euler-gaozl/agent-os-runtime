@@ -231,7 +231,7 @@ func lockContinuationFamily(ctx context.Context, tx pgx.Tx, id string) (bool, er
 	if err := tx.QueryRow(ctx, "SELECT parent_id,engine FROM runs WHERE id=$1 FOR UPDATE", id).Scan(&parent, &engine); err != nil {
 		return false, err
 	}
-	if parent != nil || engine != EngineDSHNative {
+	if parent != nil || !IsNativeEngine(engine) {
 		return false, errors.New("continuation root changed")
 	}
 	seen, frontier := map[string]bool{id: true}, []string{id}
@@ -341,7 +341,7 @@ func (s *Store) RequestFailedContinuation(ctx context.Context, id string, in Con
 	if parent != nil {
 		return saveContinuationReceipt(ctx, tx, id, in, hash, "manual_review", "child_requires_family_review")
 	}
-	if engine != EngineDSHNative {
+	if !IsNativeEngine(engine) {
 		return saveContinuationReceipt(ctx, tx, id, in, hash, "manual_review", "engine_not_assessed")
 	}
 	overflow, err := lockContinuationFamily(ctx, tx, id)

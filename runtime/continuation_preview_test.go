@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/euler-gaozl/agent-os-runtime/execution"
+	"github.com/euler-gaozl/agent-os-sdk/contracts"
 	"github.com/euler-gaozl/agent-os-sdk/serviceclient"
 	"github.com/euler-gaozl/agent-os-sdk/servicehttp"
 	"github.com/jackc/pgx/v5"
@@ -41,9 +42,18 @@ type continuationFixture struct {
 // Snapshot limits are selected before normal Submit, never edited in SQL.
 // The native model callback and archive are synthetic; no provider or Node runs.
 func continuationSetup(t *testing.T, steps, attempts int, customize func(*Snapshot)) *continuationFixture {
+	return continuationSetupVersion(t, EngineDSHNative, steps, attempts, customize)
+}
+
+func continuationSetupVersion(t *testing.T, version string, steps, attempts int, customize func(*Snapshot)) *continuationFixture {
 	t.Helper()
 	base := nativeNotesSetup(t)
+	nativeNotesNeed(t, base.store.ConfigureSubmissionEngine(version))
 	snap := nativeSnapshot()
+	if version == EngineDSHFinal {
+		snap.Agent.FinalOutput = &contracts.FinalOutputPolicy{Protocol: contracts.FinalOutputProtocol, Tool: "mcp_fixture_check", InputField: "draft", ReadyPath: []string{"structuredContent", "ready"}}
+		snap.Connectors = []Connector{{Name: "fixture", Tools: []Tool{{Name: "check", InputSchema: JSON(map[string]any{"type": "object", "properties": map[string]any{"draft": map[string]string{"type": "string"}}, "required": []string{"draft"}})}}}}
+	}
 	snap.AgentRef.ID = "continuation-" + ID()
 	snap.Agent.Prompt = continuationPrivateMarker
 	snap.Agent.MaxSteps, snap.Agent.MaxModelAttempts = steps, attempts
@@ -53,11 +63,11 @@ func continuationSetup(t *testing.T, steps, attempts int, customize func(*Snapsh
 	id, err := base.store.Submit(base.ctx, ID(), continuationPrivateMarker, snap, nil)
 	nativeNotesNeed(t, err)
 	a := &archiveFixture{}
-	e, err := execution.NewSourceVersions(base.worker, a, []string{EngineDSHNative})
+	e, err := execution.NewSourceVersions(base.worker, a, []string{version})
 	nativeNotesNeed(t, err)
 	r, err := e.Claim(base.ctx, "continuation-worker-"+ID(), time.Minute)
 	nativeNotesNeed(t, err)
-	if r.ID != id || r.Engine != EngineDSHNative || r.State.PlanRevision != 0 {
+	if r.ID != id || r.Engine != version || r.State.PlanRevision != 0 {
 		t.Fatal("normal native fixture submission/claim mismatch")
 	}
 	f := &continuationFixture{n: &nativeNotesRun{fixture: base, engine: e, archive: a, run: r}, trap: &continuationArchiveTrap{}}
@@ -140,13 +150,17 @@ type continuationView struct {
 	} `json:"basis"`
 }
 
-func continuationDecode(t *testing.T, body []byte, id, assessment, reason string) continuationView {
+func continuationDecode(t *testing.T, body []byte, id, assessment, reason string, engines ...string) continuationView {
 	t.Helper()
+	engine := EngineDSHNative
+	if len(engines) > 0 {
+		engine = engines[0]
+	}
 	var v continuationView
 	d := json.NewDecoder(bytes.NewReader(body))
 	d.DisallowUnknownFields()
 	nativeNotesNeed(t, d.Decode(&v))
-	if v.Protocol != "failed-run-continuation-preview-v1" || v.RunID != id || v.Engine != EngineDSHNative || v.Assessment != assessment || v.Reason != reason || !v.ReadOnly || v.ActionAvailable || v.ObservedAt.IsZero() {
+	if v.Protocol != "failed-run-continuation-preview-v1" || v.RunID != id || v.Engine != engine || v.Assessment != assessment || v.Reason != reason || !v.ReadOnly || v.ActionAvailable || v.ObservedAt.IsZero() {
 		t.Fatalf("unexpected continuation projection: %+v", v)
 	}
 	return v
@@ -154,7 +168,7 @@ func continuationDecode(t *testing.T, body []byte, id, assessment, reason string
 
 func (f *continuationFixture) preview(t *testing.T, assessment, reason string) continuationView {
 	t.Helper()
-	return continuationDecode(t, f.request(t, "control", "GET", f.path(), 200), f.n.run.ID, assessment, reason)
+	return continuationDecode(t, f.request(t, "control", "GET", f.path(), 200), f.n.run.ID, assessment, reason, f.n.run.Engine)
 }
 
 func continuationBasis(t *testing.T, v continuationView, rounds, attempts, maxSteps, maxAttempts int64) {
