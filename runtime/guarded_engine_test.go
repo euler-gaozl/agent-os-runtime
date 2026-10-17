@@ -32,13 +32,29 @@ func TestGuardedFinalOutputAtomicAndReplay(t *testing.T) {
 	}
 }
 
+func TestGuardedV7RemainsNonClaimableCandidate(t *testing.T) {
+	if !execution.IsFinalEngine(execution.EngineDSHGuarded) || !execution.IsSourceEngine(execution.EngineDSHGuarded) {
+		t.Fatal("v6 final/source semantics lost")
+	}
+	if !execution.IsFinalEngine(execution.EngineDSHGuardedV7) || !execution.IsSourceEngine(execution.EngineDSHGuardedV7) {
+		t.Fatal("v7 historical replay recognition missing")
+	}
+	s, _ := testStore(t)
+	if _, e := execution.NewSourceVersions(s.DB, &archiveFixture{}, []string{execution.EngineDSHGuardedV7}); e == nil {
+		t.Fatal("v7 candidate was admitted for claims before release approval")
+	}
+	if _, e := execution.NewSourceVersions(s.DB, &archiveFixture{}, []string{execution.EngineDSHGuarded}); e != nil {
+		t.Fatal("installed v6 claim support lost", e)
+	}
+}
+
 func TestGuardedAdmissionAndExplicitWorkerOptIn(t *testing.T) {
 	s, _ := testStore(t)
 	ctx := context.Background()
 	if e := s.ConfigureSubmissionEngine(EngineDSHGuarded); e != nil {
 		t.Fatal(e)
 	}
-	snap := nativeSnapshot() // Native Agents without final policy retain v6 argument protection.
+	snap := nativeSnapshot() // Native Agents without final policy retain guarded argument protection.
 	id, e := s.Submit(ctx, "guarded-native", "read source", snap, nil)
 	if e != nil {
 		t.Fatal(e)
@@ -63,7 +79,7 @@ func TestGuardedAdmissionAndExplicitWorkerOptIn(t *testing.T) {
 		t.Fatal(e)
 	}
 	if _, e = old.Claim(ctx, "old-final-only", time.Minute); !errors.Is(e, execution.ErrNoWork) {
-		t.Fatal("old Worker claimed v6")
+		t.Fatal("old Worker claimed guarded work")
 	}
 	fresh, e := execution.NewSourceVersions(s.DB, &archiveFixture{}, []string{EngineDSHGuarded})
 	if e != nil {
