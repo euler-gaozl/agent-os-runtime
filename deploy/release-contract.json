@@ -24,7 +24,7 @@
   },
   "execution_protocol": "runtime-execution-v1",
   "source_engine_candidate": "dsh-source-639ed015-state-v1",
-  "source_engine_candidates": ["dsh-source-639ed015-state-v1", "dsh-source-639ed015-resident-v2", "dsh-source-639ed015-budget-v3", "dsh-source-639ed015-native-v4", "dsh-source-639ed015-final-v5", "dsh-source-639ed015-guarded-v6"],
+  "source_engine_candidates": ["dsh-source-639ed015-state-v1", "dsh-source-639ed015-resident-v2", "dsh-source-639ed015-budget-v3", "dsh-source-639ed015-native-v4", "dsh-source-639ed015-final-v5", "dsh-source-639ed015-guarded-v7"],
   "budget_model_receipt_protocol": 1,
   "native_model_receipt_protocol": 2,
   "final_output_protocol": 1,

@@ -32,19 +32,19 @@ func TestGuardedFinalOutputAtomicAndReplay(t *testing.T) {
 	}
 }
 
-func TestGuardedV7RemainsNonClaimableCandidate(t *testing.T) {
+func TestGuardedV7AdmissionKeepsV6ReplayOnly(t *testing.T) {
 	if !execution.IsFinalEngine(execution.EngineDSHGuarded) || !execution.IsSourceEngine(execution.EngineDSHGuarded) {
-		t.Fatal("v6 final/source semantics lost")
+		t.Fatal("v7 final/source semantics missing")
 	}
-	if !execution.IsFinalEngine(execution.EngineDSHGuardedV7) || !execution.IsSourceEngine(execution.EngineDSHGuardedV7) {
-		t.Fatal("v7 historical replay recognition missing")
+	if !execution.IsFinalEngine(execution.EngineDSHGuardedV6) || !execution.IsSourceEngine(execution.EngineDSHGuardedV6) {
+		t.Fatal("v6 historical replay recognition missing")
 	}
 	s, _ := testStore(t)
-	if _, e := execution.NewSourceVersions(s.DB, &archiveFixture{}, []string{execution.EngineDSHGuardedV7}); e == nil {
-		t.Fatal("v7 candidate was admitted for claims before release approval")
-	}
 	if _, e := execution.NewSourceVersions(s.DB, &archiveFixture{}, []string{execution.EngineDSHGuarded}); e != nil {
-		t.Fatal("installed v6 claim support lost", e)
+		t.Fatal("v7 guarded admission failed", e)
+	}
+	if _, e := execution.NewSourceVersions(s.DB, &archiveFixture{}, []string{execution.EngineDSHGuardedV6}); e == nil {
+		t.Fatal("v6 was re-admitted for claims after replacement")
 	}
 }
 

@@ -20,7 +20,7 @@ const EngineDSHBudget = runstate.EngineDSHBudget
 const EngineDSHNative = runstate.EngineDSHNative
 const EngineDSHFinal = runstate.EngineDSHFinal
 const EngineDSHGuarded = runstate.EngineDSHGuarded
-const EngineDSHGuardedV7 = runstate.EngineDSHGuardedV7
+const EngineDSHGuardedV6 = runstate.EngineDSHGuardedV6
 const NativeRequestBytes = runstate.NativeRequestBytes
 const NativeResponseBytes = runstate.NativeResponseBytes
 
