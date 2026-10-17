@@ -29,9 +29,22 @@ func TestIndependentFinalWorkerOriginalAndRecovery(t *testing.T) {
 	}
 }
 
-func testFinalWorker(t *testing.T, mode string) {
+func TestIndependentGuardedWorkerOriginalAndRecovery(t *testing.T) {
+	for _, mode := range []string{"original", "arguments", "selection_kill", "result_kill", "select_sql", "finish_sql", "cancel", "partial", "model503"} {
+		t.Run(mode, func(t *testing.T) { testFinalWorker(t, mode, EngineDSHGuarded) })
+	}
+}
+
+func testFinalWorker(t *testing.T, mode string, engines ...string) {
 	binary, _, node := requireEvidenceWorker(t)
+	engine, runnerEnv := EngineDSHFinal, "DSH_FINAL_RUNNER"
+	if len(engines) > 0 {
+		engine, runnerEnv = engines[0], "DSH_GUARDED_RUNNER"
+	}
 	runner := os.Getenv("TEST_FINAL_DSH_RUNNER")
+	if engine == EngineDSHGuarded {
+		runner = os.Getenv("TEST_GUARDED_DSH_RUNNER")
+	}
 	if runner == "" {
 		t.Fatal("fixed final-v5 runner required")
 	}
@@ -43,7 +56,7 @@ func testFinalWorker(t *testing.T, mode string) {
 	}
 	token := testToken + "final-worker"
 	s := NewStore(rolePool(t, db, role), &serviceclient.Client{Token: token}, "")
-	if e := s.ConfigureSubmissionEngine(EngineDSHFinal); e != nil {
+	if e := s.ConfigureSubmissionEngine(engine); e != nil {
 		t.Fatal(e)
 	}
 	server := httptest.NewServer((&Server{Store: s}).Handler(servicehttp.Config{Role: "runtime", Authorize: Authorize, Peers: map[string]string{"worker": servicehttp.TokenHash(token), "control": servicehttp.TokenHash(token + "control")}}))
@@ -98,6 +111,25 @@ func testFinalWorker(t *testing.T, mode string) {
 			return
 		}
 		n := generations.Add(1)
+		if mode == "arguments" {
+			if n == 1 {
+				m := Message{Role: "assistant", ToolCalls: []ToolCall{{ID: "bad-input", Type: "function", Function: FunctionCall{Name: "mcp_fixture_check", Arguments: `{"draft":2400}`}}}}
+				jsonResponse(w, 200, map[string]any{"choices": []any{map[string]any{"message": m, "finish_reason": "tool_calls"}}, "usage": map[string]int{"prompt_tokens": 200, "completion_tokens": 50, "total_tokens": 250}})
+				return
+			}
+			found := false
+			for _, m := range body.Messages {
+				if m.Role == "tool" && strings.Contains(m.Content, "INVALID_TOOL_ARGUMENTS") {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("correctable validation feedback missing")
+				w.WriteHeader(500)
+				return
+			}
+			n--
+		}
 		if mode == "model503" {
 			if n == 2 {
 				jsonResponse(w, 503, map[string]any{"error": map[string]string{"message": "synthetic temporary failure after check"}})
@@ -222,6 +254,8 @@ func testFinalWorker(t *testing.T, mode string) {
 	defer close(release)
 	s.StorageURL = archive.server.URL
 	config := map[string]string{"DATABASE_URL": evidenceWorkerDSN(t, db, workerRole), "SERVICE_TOKEN": token, "SERVICE_PEERS": string(JSON(map[string]string{"worker": servicehttp.TokenHash(token)})), "RUNTIME_URL": server.URL, "REGISTRY_URL": server.URL, "TOOLHUB_URL": hub.URL, "STORAGE_URL": archive.server.URL, "AGENTOS_NODE": node, "DSH_FINAL_RUNNER": runner, "SSL_CERT_FILE": ca, "GODEBUG": "x509sslcertoverrideplatform=1", "LISTEN": "127.0.0.1:0", "INSTANCE_ID": "final-first", "DB_MAX_CONNS": "3"}
+	delete(config, "DSH_FINAL_RUNNER")
+	config[runnerEnv] = runner
 	first, done := startEvidenceWorker(t, ctx, binary, config)
 	var result Run
 	var failedAttempt []byte
@@ -342,6 +376,13 @@ func testFinalWorker(t *testing.T, mode string) {
 		t.Fatal("checked original not delivered", result.Status, result.State.Error)
 	}
 	wantRequests, wantUnknown := int64(2), int64(0)
+	if mode == "arguments" {
+		wantRequests = 3
+		var toolCalls int
+		if e = db.QueryRow(ctx, "SELECT count(*) FROM calls WHERE run_id=$1 AND kind='tool'", id).Scan(&toolCalls); e != nil || toolCalls != 1 {
+			t.Fatal("invalid arguments reached execution intent", e, toolCalls)
+		}
+	}
 	if mode == "model503" {
 		wantRequests, wantUnknown = 3, 1
 		var retained []byte
@@ -356,7 +397,7 @@ func testFinalWorker(t *testing.T, mode string) {
 	if generations.Load() != wantRequests || checks.Load() != 1 || int64(u.Attempts) != wantRequests || int64(u.UnknownUsageAttempts) != wantUnknown {
 		t.Fatal("recovery repeated effects", generations.Load(), checks.Load(), u)
 	}
-	if mode != "original" && (!resumed || result.Fence != 2) {
+	if mode != "original" && mode != "arguments" && (!resumed || result.Fence != 2) {
 		t.Fatal("expected recovery not exercised", resumed, result.Fence)
 	}
 	var receipts, pending int
