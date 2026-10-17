@@ -19,18 +19,31 @@ const EngineDSHNative = "dsh-source-639ed015-native-v4"
 const EngineDSHFinal = "dsh-source-639ed015-final-v5"
 const EngineDSHGuarded = "dsh-source-639ed015-guarded-v7"
 const EngineDSHGuardedV6 = "dsh-source-639ed015-guarded-v6"
+const EngineDSHSourceV2 = "dsh-source-687f282e-state-v1"
+const EngineDSHResidentV2 = "dsh-source-687f282e-resident-v2"
+const EngineDSHBudgetV2 = "dsh-source-687f282e-budget-v3"
+const EngineDSHNativeV2 = "dsh-source-687f282e-native-v4"
+const EngineDSHFinalV2 = "dsh-source-687f282e-final-v5"
+const EngineDSHGuardedV2 = "dsh-source-687f282e-guarded-v7"
 
 func IsFinalEngine(engine string) bool {
-	return engine == EngineDSHFinal || engine == EngineDSHGuarded || engine == EngineDSHGuardedV6
+	return engine == EngineDSHFinal || engine == EngineDSHFinalV2 || engine == EngineDSHGuarded || engine == EngineDSHGuardedV2 || engine == EngineDSHGuardedV6
 }
-func IsNativeEngine(engine string) bool { return engine == EngineDSHNative || IsFinalEngine(engine) }
+func IsNativeEngine(engine string) bool {
+	return engine == EngineDSHNative || engine == EngineDSHNativeV2 || IsFinalEngine(engine)
+}
+
+func IsBudgetEngine(engine string) bool {
+	return engine == EngineDSHBudget || engine == EngineDSHBudgetV2
+}
 
 func IsSourceEngine(engine string) bool {
-	return engine == EngineDSHSource || engine == EngineDSHResident || engine == EngineDSHBudget || IsNativeEngine(engine)
+	return engine == EngineDSHSource || engine == EngineDSHSourceV2 || engine == EngineDSHResident || engine == EngineDSHResidentV2 ||
+		engine == EngineDSHBudget || engine == EngineDSHBudgetV2 || IsNativeEngine(engine)
 }
 
 func hasDurableModelOutcome(engine string) bool {
-	return engine == EngineDSHBudget || IsNativeEngine(engine)
+	return engine == EngineDSHBudget || engine == EngineDSHBudgetV2 || IsNativeEngine(engine)
 }
 
 func hasIncrementalEvidence(engine string) bool {

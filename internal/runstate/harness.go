@@ -261,7 +261,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		if e = json.Unmarshal(request, &m); e != nil {
 			return nil, false, e
 		}
-		if r.Engine == EngineDSHBudget {
+		if IsBudgetEngine(r.Engine) {
 			budgetMaxTokens, e = budgetOutputLimit(r.Snapshot, m)
 			if e != nil {
 				return nil, false, e
@@ -277,7 +277,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		if cap := r.Snapshot.Agent.Model.MaxTokens; cap > 0 && (m.MaxTokens == 0 || cap < m.MaxTokens) {
 			modelRun.Snapshot.Agent.Model.MaxTokens = cap
 		}
-		if r.Engine == EngineDSHBudget {
+		if IsBudgetEngine(r.Engine) {
 			budget, ok := effects.(BudgetModelEffects)
 			if !ok {
 				return nil, false, errors.New("budget model transport unavailable")
