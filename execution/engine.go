@@ -103,6 +103,8 @@ func NewSourceVersions(db *pgxpool.Pool, archives ArtifactWriter, engines []stri
 			s.FinalEnabled = true
 		case EngineDSHGuarded:
 			s.GuardedEnabled = true
+		case EngineDSHGuardedV6:
+			s.GuardedV6Enabled = true
 		default:
 			return nil, errors.New("unsupported source engine")
 		}

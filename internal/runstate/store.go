@@ -12,14 +12,15 @@ import (
 
 // Store is internal to this owner module. Its database never crosses the public execution facade.
 type Store struct {
-	DB              *pgxpool.Pool
-	Archives        ArtifactWriter
-	SourceEnabled   bool
-	ResidentEnabled bool
-	BudgetEnabled   bool
-	NativeEnabled   bool
-	FinalEnabled    bool
-	GuardedEnabled  bool
+	DB               *pgxpool.Pool
+	Archives         ArtifactWriter
+	SourceEnabled    bool
+	ResidentEnabled  bool
+	BudgetEnabled    bool
+	NativeEnabled    bool
+	FinalEnabled     bool
+	GuardedEnabled   bool
+	GuardedV6Enabled bool
 }
 type ArtifactWriter interface {
 	PutArtifact(context.Context, []byte, string, string) (string, error)
@@ -193,6 +194,9 @@ func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration) (R
 	}
 	if s.GuardedEnabled {
 		engines = append(engines, EngineDSHGuarded)
+	}
+	if s.GuardedV6Enabled {
+		engines = append(engines, EngineDSHGuardedV6)
 	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {

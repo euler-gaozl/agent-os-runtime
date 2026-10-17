@@ -32,19 +32,19 @@ func TestGuardedFinalOutputAtomicAndReplay(t *testing.T) {
 	}
 }
 
-func TestGuardedV7AdmissionKeepsV6ReplayOnly(t *testing.T) {
+func TestGuardedV6AndV7AreBothAdmitted(t *testing.T) {
 	if !execution.IsFinalEngine(execution.EngineDSHGuarded) || !execution.IsSourceEngine(execution.EngineDSHGuarded) {
 		t.Fatal("v7 final/source semantics missing")
 	}
 	if !execution.IsFinalEngine(execution.EngineDSHGuardedV6) || !execution.IsSourceEngine(execution.EngineDSHGuardedV6) {
-		t.Fatal("v6 historical replay recognition missing")
+		t.Fatal("v6 final/source semantics missing")
 	}
 	s, _ := testStore(t)
 	if _, e := execution.NewSourceVersions(s.DB, &archiveFixture{}, []string{execution.EngineDSHGuarded}); e != nil {
 		t.Fatal("v7 guarded admission failed", e)
 	}
-	if _, e := execution.NewSourceVersions(s.DB, &archiveFixture{}, []string{execution.EngineDSHGuardedV6}); e == nil {
-		t.Fatal("v6 was re-admitted for claims after replacement")
+	if _, e := execution.NewSourceVersions(s.DB, &archiveFixture{}, []string{execution.EngineDSHGuardedV6}); e != nil {
+		t.Fatal("v6 guarded recovery admission failed", e)
 	}
 }
 
