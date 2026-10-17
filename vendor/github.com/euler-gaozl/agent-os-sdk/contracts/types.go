@@ -49,23 +49,24 @@ type Skill struct {
 	Files   []string `json:"files,omitempty"`
 }
 type Agent struct {
-	MaxModelAttempts int         `json:"max_model_attempts,omitempty"`
-	ModelTokenBudget int         `json:"model_token_budget,omitempty"`
-	ContextTokens    int         `json:"context_tokens"`
-	Constraints      []string    `json:"constraints,omitempty"`
-	Publication      Publication `json:"publication"`
-	Name             string      `json:"name"`
-	Prompt           string      `json:"prompt"`
-	Prompts          []Ref       `json:"prompts"`
-	Skills           []Ref       `json:"skills"`
-	Connectors       []Ref       `json:"connectors"`
-	Tools            []string    `json:"tools"`
-	Model            ModelConfig `json:"model"`
-	MaxSteps         int         `json:"max_steps"`
-	ContextBytes     int         `json:"context_bytes"`
-	MaxChildren      int         `json:"max_children"`
-	ChildAgents      []Ref       `json:"child_agents"`
-	Knowledge        []Ref       `json:"knowledge"`
+	FinalOutput      *FinalOutputPolicy `json:"final_output,omitempty"`
+	MaxModelAttempts int                `json:"max_model_attempts,omitempty"`
+	ModelTokenBudget int                `json:"model_token_budget,omitempty"`
+	ContextTokens    int                `json:"context_tokens"`
+	Constraints      []string           `json:"constraints,omitempty"`
+	Publication      Publication        `json:"publication"`
+	Name             string             `json:"name"`
+	Prompt           string             `json:"prompt"`
+	Prompts          []Ref              `json:"prompts"`
+	Skills           []Ref              `json:"skills"`
+	Connectors       []Ref              `json:"connectors"`
+	Tools            []string           `json:"tools"`
+	Model            ModelConfig        `json:"model"`
+	MaxSteps         int                `json:"max_steps"`
+	ContextBytes     int                `json:"context_bytes"`
+	MaxChildren      int                `json:"max_children"`
+	ChildAgents      []Ref              `json:"child_agents"`
+	Knowledge        []Ref              `json:"knowledge"`
 }
 type Snapshot struct {
 	Agent      Agent                    `json:"agent"`
@@ -177,6 +178,14 @@ func Has(values []string, s string) bool {
 	return false
 }
 func (a *Agent) Validate() error {
+	if a.FinalOutput != nil {
+		if err := a.FinalOutput.Validate(); err != nil {
+			return err
+		}
+		if a.Model.Limits == nil {
+			return errors.New("receipt final output requires native model capabilities")
+		}
+	}
 	if a.Model.Limits != nil {
 		if e := a.Model.Limits.Validate(a.ContextTokens, a.Model); e != nil {
 			return e

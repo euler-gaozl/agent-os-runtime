@@ -3,7 +3,7 @@ module github.com/euler-gaozl/agent-os-runtime
 go 1.27.0
 
 require (
-	github.com/euler-gaozl/agent-os-sdk v0.1.0-rc.3
+	github.com/euler-gaozl/agent-os-sdk v0.1.0-rc.4
 	github.com/jackc/pgx/v5 v5.11.0
 )
 

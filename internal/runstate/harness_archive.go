@@ -16,12 +16,17 @@ const EngineDSHSource = "dsh-source-639ed015-state-v1"
 const EngineDSHResident = "dsh-source-639ed015-resident-v2"
 const EngineDSHBudget = "dsh-source-639ed015-budget-v3"
 const EngineDSHNative = "dsh-source-639ed015-native-v4"
+const EngineDSHFinal = "dsh-source-639ed015-final-v5"
+
+func IsNativeEngine(engine string) bool { return engine == EngineDSHNative || engine == EngineDSHFinal }
 
 func IsSourceEngine(engine string) bool {
-	return engine == EngineDSHSource || engine == EngineDSHResident || engine == EngineDSHBudget || engine == EngineDSHNative
+	return engine == EngineDSHSource || engine == EngineDSHResident || engine == EngineDSHBudget || IsNativeEngine(engine)
 }
 
-func hasDurableModelOutcome(engine string) bool { return engine == EngineDSHBudget || engine == EngineDSHNative }
+func hasDurableModelOutcome(engine string) bool {
+	return engine == EngineDSHBudget || IsNativeEngine(engine)
+}
 
 func hasIncrementalEvidence(engine string) bool {
 	return engine == EngineDSHEvidence || IsSourceEngine(engine)
@@ -56,7 +61,9 @@ type HarnessArchive struct {
 // timestamps or identifiers. No external effect may precede archive commit.
 func stageHarnessArchive(ctx context.Context, tx pgx.Tx, r Run, f Frame) error {
 	limit := archiveBatchBytes
-	if r.Engine == EngineDSHNative { limit = 64 << 20 }
+	if IsNativeEngine(r.Engine) {
+		limit = 64 << 20
+	}
 	if len(f.Events) > limit || !utf8.Valid(f.Events) {
 		return errors.New("DSH event batch exceeds retention budget or is not UTF-8")
 	}

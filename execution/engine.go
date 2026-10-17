@@ -18,6 +18,7 @@ const EngineDSHSource = runstate.EngineDSHSource
 const EngineDSHResident = runstate.EngineDSHResident
 const EngineDSHBudget = runstate.EngineDSHBudget
 const EngineDSHNative = runstate.EngineDSHNative
+const EngineDSHFinal = runstate.EngineDSHFinal
 const NativeRequestBytes = runstate.NativeRequestBytes
 const NativeResponseBytes = runstate.NativeResponseBytes
 
@@ -95,6 +96,8 @@ func NewSourceVersions(db *pgxpool.Pool, archives ArtifactWriter, engines []stri
 			s.BudgetEnabled = true
 		case EngineDSHNative:
 			s.NativeEnabled = true
+		case EngineDSHFinal:
+			s.FinalEnabled = true
 		default:
 			return nil, errors.New("unsupported source engine")
 		}

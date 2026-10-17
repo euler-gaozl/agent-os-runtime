@@ -45,6 +45,11 @@ func canonicalHash(b []byte) string {
 }
 
 func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) (any, bool, error) {
+	if f.Method == "final_output_select" || f.Method == "finish_ref" {
+		if r.Engine != EngineDSHFinal {
+			return nil, false, errors.New("receipt finalization requires final-v5")
+		}
+	}
 	if (f.Method == "checkpoint" || f.Method == "working_state_read" || f.Method == "working_state_update") && !IsSourceEngine(r.Engine) {
 		return nil, false, errors.New("source bridge method requires the source engine")
 	}
@@ -57,6 +62,12 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	}
 	if fresh.Engine != r.Engine {
 		return nil, false, errors.New("execution engine differs from the immutable run")
+	}
+	if fresh.Engine == EngineDSHFinal && fresh.Snapshot.Agent.FinalOutput != nil && f.Method == "finish" {
+		return nil, false, errors.New("receipt finalization cannot fall back to text finish")
+	}
+	if fresh.Status == "completed" && f.Method == "finish_ref" {
+		return s.replayFinalCompletion(ctx, r, fresh, f)
 	}
 	r.RuleRevision = fresh.RuleRevision
 	r.Constraints = fresh.Constraints
@@ -127,11 +138,16 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		}
 	} else {
 		revision = r.RuleRevision
-		if f.Method == "working_state_update" {
+		if f.Method == "working_state_update" || r.Engine == EngineDSHFinal && (f.Method == "tool" || f.Method == "final_output_select" || f.Method == "finish_ref") {
 			// Pin the originating model's rules, not refreshed rules at dispatch.
 			revision = r.State.PlanRevision
 		}
 		request = f.Params
+		if r.Engine == EngineDSHFinal && f.Method == "checkpoint" {
+			// Freeze the projection with the first archive intent. A retry can
+			// regenerate session events; it must not replace committed evidence.
+			request = JSON(map[string]any{"finalization_events": finalEvents(f.Events)})
+		}
 		if f.Method == "model" {
 			var m ModelInput
 			if e = json.Unmarshal(request, &m); e != nil {
@@ -200,6 +216,9 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		r.State.HarnessArtifact = hash
 	}
 	op := fmt.Sprintf("%s/dsh/%d", r.ID, f.ID)
+	if f.Method == "final_output_select" || f.Method == "finish_ref" {
+		return s.finalExchange(ctx, r, f, revision)
+	}
 	var value any
 	var budgetRequest json.RawMessage
 	var budgetMaxTokens int
@@ -207,6 +226,15 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 	switch f.Method {
 	case "checkpoint":
 		value = map[string]any{"persisted": true, "manifest_hash": r.State.HarnessArtifact}
+		if r.Engine == EngineDSHFinal {
+			var projection struct {
+				Events []finalEvent `json:"finalization_events"`
+			}
+			if e = json.Unmarshal(request, &projection); e != nil {
+				return nil, false, e
+			}
+			value.(map[string]any)["finalization_events"] = projection.Events
+		}
 	case "working_state_read", "working_state_update":
 		source, ok := effects.(SourceEffects)
 		if !ok {
@@ -239,7 +267,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 				return nil, false, e
 			}
 		}
-		if r.Engine == EngineDSHNative && (m.MaxTokens != r.Snapshot.Agent.Model.MaxTokens || (m.Purpose != "generation" && m.Purpose != "compaction")) {
+		if IsNativeEngine(r.Engine) && (m.MaxTokens != r.Snapshot.Agent.Model.MaxTokens || (m.Purpose != "generation" && m.Purpose != "compaction")) {
 			return nil, false, errors.New("native purpose/output differs from frozen capabilities")
 		}
 		modelRun := *r
@@ -258,7 +286,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 			if e != nil {
 				return nil, false, e
 			}
-		} else if r.Engine == EngineDSHNative {
+		} else if IsNativeEngine(r.Engine) {
 			native, ok := effects.(NativeModelEffects)
 			if !ok {
 				return nil, false, errors.New("native model transport unavailable")
@@ -320,7 +348,14 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 			if e = s.DB.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM calls WHERE id=$1 AND run_id=$2 AND kind='tool' AND status='completed')", op, r.ID).Scan(&committed); e != nil {
 				return nil, false, e
 			}
-			value = string(JSON(map[string]any{"result": value, "receipt": map[string]any{"operation_id": op, "committed": committed}}))
+			receipt := map[string]any{"operation_id": op, "committed": committed}
+			if r.Engine == EngineDSHFinal && committed && r.Snapshot.Agent.FinalOutput != nil && in.Name == r.Snapshot.Agent.FinalOutput.Tool {
+				text, ready, valid := finalCandidateText(r.Snapshot.Agent.FinalOutput, in.Arguments, raw)
+				if valid {
+					receipt["final_output"] = map[string]any{"protocol": "receipt-field-v1", "sha256": Hash([]byte(text)), "ready": ready}
+				}
+			}
+			value = string(JSON(map[string]any{"result": value, "receipt": receipt}))
 		}
 	case "finish":
 		if r.State.PlanRevision != r.RuleRevision {
@@ -348,7 +383,7 @@ func (s *Store) Exchange(ctx context.Context, r *Run, f Frame, effects Effects) 
 		return nil, false, e
 	}
 	if f.Method == "model" && hasDurableModelOutcome(r.Engine) {
-		if r.Engine == EngineDSHNative {
+		if IsNativeEngine(r.Engine) {
 			value, e = freezeNativeModel(ctx, tx, *r, op, budgetRequest)
 		} else {
 			value, e = freezeBudgetModel(ctx, tx, *r, op, budgetRequest, budgetMaxTokens)

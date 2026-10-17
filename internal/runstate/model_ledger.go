@@ -66,7 +66,7 @@ func (s *Store) BeginModel(ctx context.Context, r Run, id string, request []byte
 			return "", nil, errors.New("context rejection must be committed without a model attempt")
 		}
 	}
-	if engine == EngineDSHNative || r.Engine == EngineDSHNative {
+	if IsNativeEngine(engine) || IsNativeEngine(r.Engine) {
 		if engine != r.Engine {
 			return "", nil, errors.New("model engine differs from immutable run")
 		}
@@ -91,7 +91,7 @@ func (s *Store) BeginModel(ctx context.Context, r Run, id string, request []byte
 			return "", response, tx.Commit(ctx)
 		}
 	}
-	if engine == EngineDSHNative {
+	if IsNativeEngine(engine) {
 		// Completed receipts above remain replayable. Only a new attempt must
 		// match the current rules, while the run row is still locked. Exchange
 		// may have refreshed r.RuleRevision while retaining an older intent.

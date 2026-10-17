@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/euler-gaozl/agent-os-runtime/internal/runstate"
 	"github.com/euler-gaozl/agent-os-sdk/servicehttp"
 	"github.com/jackc/pgx/v5"
 )
@@ -98,12 +99,12 @@ type SourceRecovery struct {
 func readSourceRecovery(ctx context.Context, reader noteReader, id string) (SourceRecovery, error) {
 	v := SourceRecovery{RunID: id}
 	var status, engine, manifest string
-	var cancelled, unresolved bool
+	var cancelled, unresolved, staged bool
 	err := reader.QueryRow(ctx, `SELECT r.status,r.engine,r.cancel_requested,COALESCE(e.method,''),COALESCE(a.manifest_hash,''),
- EXISTS(SELECT 1 FROM calls c WHERE c.run_id=r.id AND c.status IN('inflight','unknown'))
+ EXISTS(SELECT 1 FROM calls c WHERE c.run_id=r.id AND c.status IN('inflight','unknown')),COALESCE(a.batch IS NOT NULL,false)
  FROM runs r LEFT JOIN LATERAL (SELECT seq,method FROM harness_exchanges WHERE run_id=r.id ORDER BY seq DESC LIMIT 1) e ON true
  LEFT JOIN harness_archives a ON a.run_id=r.id AND a.seq=e.seq WHERE r.id=$1`, id).
-		Scan(&status, &engine, &cancelled, &v.method, &manifest, &unresolved)
+		Scan(&status, &engine, &cancelled, &v.method, &manifest, &unresolved, &staged)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, stateError(404, "run not found")
 	}
@@ -119,9 +120,9 @@ func readSourceRecovery(ctx context.Context, reader noteReader, id string) (Sour
 		v.Reason = "not_waiting"
 	case unresolved:
 		v.Reason = "unresolved_calls"
-	case v.method != "working_state_read" && v.method != "working_state_update":
+	case v.method != "working_state_read" && v.method != "working_state_update" && !runstate.IsFinalRecoveryMethod(engine, v.method):
 		v.Reason = "no_state_exchange"
-	case manifest == "":
+	case manifest == "" && !(runstate.IsFinalRecoveryMethod(engine, v.method) && staged):
 		v.Reason = "archive_unconfirmed"
 	default:
 		v.Reason, v.Allowed = "ready", true

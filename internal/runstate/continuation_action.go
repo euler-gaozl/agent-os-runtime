@@ -399,7 +399,7 @@ func (s *Store) ResumeFailedLegacy(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if engine == EngineDSHNative {
+	if IsNativeEngine(engine) {
 		return ErrExplicitContinuationNeeded
 	}
 	tag, err := tx.Exec(ctx, "UPDATE runs SET status='queued',owner='',lease_until=NULL,updated_at=now() WHERE id=$1 AND status='failed' AND NOT cancel_requested", id)

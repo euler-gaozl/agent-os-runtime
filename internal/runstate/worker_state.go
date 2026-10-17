@@ -64,10 +64,22 @@ func (s *Store) CheckpointFailure(ctx context.Context, r Run, cause error) error
 	if fresh.Owner != r.Owner || fresh.Fence != r.Fence {
 		return ErrFence
 	}
+	if fresh.Engine == EngineDSHFinal && fresh.Status == "completed" {
+		return nil
+	}
 	r.State.Error = cause.Error()
 	status := "failed"
 	if errors.Is(cause, ErrUnknown) {
 		status = "waiting_unknown"
+	}
+	if fresh.Engine == EngineDSHFinal {
+		var method string
+		if e = s.DB.QueryRow(ctx, "SELECT COALESCE((SELECT method FROM harness_exchanges WHERE run_id=$1 ORDER BY seq DESC LIMIT 1),'')", r.ID).Scan(&method); e != nil {
+			return e
+		}
+		if IsFinalRecoveryMethod(fresh.Engine, method) {
+			status = "waiting_unknown"
+		}
 	}
 	if fresh.CancelRequested {
 		status = "cancelled"

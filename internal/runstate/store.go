@@ -18,6 +18,7 @@ type Store struct {
 	ResidentEnabled bool
 	BudgetEnabled   bool
 	NativeEnabled   bool
+	FinalEnabled    bool
 }
 type ArtifactWriter interface {
 	PutArtifact(context.Context, []byte, string, string) (string, error)
@@ -61,7 +62,10 @@ func insertRunEngine(ctx context.Context, tx pgx.Tx, key, task string, snap Snap
 	// A native-capable deployment still serves frozen legacy Agent revisions.
 	// All-native trees use v4; wholly legacy trees keep the fixed v3 protocol.
 	// Mixed trees remain rejected by native validation, never silently rewritten.
-	legacyOnNative := parent == nil && engine == EngineDSHNative && !hasNativeCapabilities(snap)
+	if parent == nil && engine == EngineDSHFinal && !hasFinalOutput(snap) {
+		engine = EngineDSHNative
+	}
+	legacyOnNative := parent == nil && IsNativeEngine(engine) && !hasNativeCapabilities(snap)
 	if legacyOnNative {
 		engine = EngineDSHBudget
 	}
@@ -74,19 +78,22 @@ func insertRunEngine(ctx context.Context, tx pgx.Tx, key, task string, snap Snap
 		return "", errors.New("idempotency key reused with different input")
 	}
 	if actual == id {
+		if err := validateFinalSnapshot(snap, engine); err != nil {
+			return "", err
+		}
 		if legacyOnNative {
 			if err := validateLegacyModelTree(snap); err != nil {
 				return "", err
 			}
 		}
 		taskLimit := 40000
-		if engine == EngineDSHNative {
+		if IsNativeEngine(engine) {
 			taskLimit = 16 << 20
 		}
 		if len(task) > taskLimit {
 			return "", errors.New("new task exceeds execution transport capacity")
 		}
-		if engine == EngineDSHNative {
+		if IsNativeEngine(engine) {
 			if err := ValidateNativeSnapshot(snap); err != nil {
 				return "", err
 			}
@@ -180,6 +187,9 @@ func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration) (R
 	if s.NativeEnabled {
 		engines = append(engines, EngineDSHNative)
 	}
+	if s.FinalEnabled {
+		engines = append(engines, EngineDSHFinal)
+	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
 		return Run{}, e
@@ -234,8 +244,12 @@ func (s *Store) Save(ctx context.Context, r Run, status string) error {
 	}
 	if status == "completed" {
 		var revision int64
-		if e = tx.QueryRow(ctx, "SELECT rule_revision FROM runs WHERE id=$1", r.ID).Scan(&revision); e != nil {
+		var referenceOnly bool
+		if e = tx.QueryRow(ctx, "SELECT rule_revision,engine=$2 AND COALESCE(snapshot#>'{agent,final_output}','null'::jsonb)<>'null'::jsonb FROM runs WHERE id=$1", r.ID, EngineDSHFinal).Scan(&revision, &referenceOnly); e != nil {
 			return e
+		}
+		if referenceOnly {
+			return errors.New("receipt finalization requires atomic finish_ref")
 		}
 		if revision != r.RuleRevision {
 			return errors.New("constraints changed before completion; resume with current constraints")
@@ -266,9 +280,10 @@ func (s *Store) Cancel(ctx context.Context, id string) error {
 	// their existing reconciliation requirement.
 	_, e = tx.Exec(ctx, `UPDATE runs r SET cancel_requested=true,status=CASE WHEN status IN('queued','waiting_children','failed')
  OR (status='waiting_unknown' AND engine=ANY($2)
- AND (SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1) IN('working_state_read','working_state_update')
+ AND ((SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1) IN('working_state_read','working_state_update','final_output_select','finish_ref')
+ OR (engine=$3 AND (SELECT method FROM harness_exchanges h WHERE h.run_id=r.id ORDER BY seq DESC LIMIT 1)='checkpoint'))
  AND NOT EXISTS(SELECT 1 FROM calls c WHERE c.run_id=r.id AND c.status IN('inflight','unknown')))
- THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget, EngineDSHNative})
+ THEN CASE WHEN EXISTS(SELECT 1 FROM runs c WHERE c.parent_id=r.id AND c.status NOT IN('completed','failed','cancelled')) THEN 'waiting_children' ELSE 'cancelled' END ELSE status END,updated_at=now() WHERE id=ANY($1) AND status NOT IN('completed','cancelled')`, ids, []string{EngineDSHSource, EngineDSHResident, EngineDSHBudget, EngineDSHNative, EngineDSHFinal}, EngineDSHFinal)
 	if e != nil {
 		return e
 	}

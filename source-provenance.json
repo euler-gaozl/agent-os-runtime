@@ -5,10 +5,10 @@
     "commit": "752c9081f05733365f46594bd7581ec55b4ad875"
   },
   "sdk": {
-    "version": "v0.1.0-rc.3",
-    "module_sum": "h1:1Vxtuif+Fn5+vm8aN+WmK8Idf8rid2je9xfkoEfuQeA=",
-    "zip_sha256": "9fe7df5df1558314b03a0f0107f9a6444b94f51ca192ef71705bb1602de879c0",
-    "commit": "bbbfe34b65ac44c1823b1029349b454aef26ce21",
+    "version": "v0.1.0-rc.4",
+    "module_sum": "h1:bzAa7Zt82pETqEcifNMqP5qMO3BdpKPEoHZGOo9vOM4=",
+    "zip_sha256": "f3301da68a7b9493cf6e53ee7b5f909384096d92494ed70815fd1eaf4cd1ef8d",
+    "commit": "4022ca5e86168b1d5f748b72a8483cd7ff5a73e8",
     "module": "github.com/euler-gaozl/agent-os-sdk"
   },
   "distribution": "Fixed SDK with committed vendor; execution protocol owned here, no imported integration or sibling source."
