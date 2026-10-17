@@ -61,6 +61,8 @@ go vet -mod=vendor ./...
 
 先创建 Runtime/Worker 两个不同应用账号，用独立 DDL 连接 `MIGRATION_DATABASE_URL` 执行 `migrate --role <runtime账号> --worker-role <worker账号>`。迁移保留 public 表位置和锁 8843921，本域结构、触发器与授权原子提交；正常启动不做 DDL，没有自动反向迁移或旧授权撤销。
 
+Windows 受管迁移也接受 `migrate --config <受保护文件>`：JSON 必须恰好包含 `MIGRATION_DATABASE_URL`、`ROLE`、`WORKER_ROLE` 三个非空字符串，两个账号必须不同，不能与连接环境变量或角色参数混用。连接密码不进入进程命令行；协调器在验证迁移并归档日志后删除临时配置。此入口沿用相同 Owner 事务，不改变授权或历史任务。
+
 Worker 新账号只访问六张执行表和事件序列，不读写工作状态表、笔记或其他数据域。旧单仓 Worker readiness 曾读更广的 Runtime 表，回滚窗口内需保留其 SELECT，不能把新最小权限账号当作旧程序兼容证明。
 
 `retire-access --role <runtime账号> --worker-role <worker账号> --foreign-roles <逗号分隔账号>` 是单独协调的权限收缩作业。先验证可还原备份、阻断新连接、停消费者并核对真实程序/数据库绑定；事务用 RESTRICT 处理本域，拒绝危险继承、PUBLIC、默认 ACL、活跃会话等情况。COMMIT 回复未知时保持停机、只读核对实际授权；不把客户端错误当成事务回滚，也不自动恢复广泛权限。
