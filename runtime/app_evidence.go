@@ -81,7 +81,11 @@ func scanAppEvidence(row pgx.Row, item *appEvidence, extra ...any) error {
 }
 
 func (s *Store) appEvidenceRuns(ctx context.Context, app, root string) ([]string, error) {
-	rows, err := s.DB.Query(ctx, `WITH RECURSIVE visible AS (
+	return appEvidenceTree(ctx, s.DB, app, root)
+}
+
+func appEvidenceTree(ctx context.Context, db evidenceDB, app, root string) ([]string, error) {
+	rows, err := db.Query(ctx, `WITH RECURSIVE visible AS (
  SELECT run_id AS id FROM app_runs WHERE app=$1 AND run_id=$2
  UNION SELECT child.id FROM runs child JOIN visible parent ON child.parent_id=parent.id)
  SELECT id FROM visible LIMIT 129`, app, root)
@@ -125,11 +129,15 @@ func (s *Store) readAppEvidence(ctx context.Context, app, root, document, after 
 	if err != nil {
 		return out, err
 	}
-	query := `SELECT ` + evidenceColumns + ` FROM calls WHERE run_id=ANY($1) AND ` + documentReceipt
-	args := []any{ids, limit + 1, document}
+	versions, err := boundEvidenceVersions(ctx, s.DB, app, root)
+	if err != nil {
+		return out, err
+	}
+	query := `SELECT ` + evidenceColumns + ` FROM calls WHERE (run_id=ANY($1) OR id=ANY($5)) AND (NOT ($4::jsonb ? id) OR (` + boundReceiptPredicate(4) + `)) AND ` + documentReceipt
+	args := []any{ids, limit + 1, document, JSON(versions), boundOperationIDs(versions)}
 	query += ` AND ($3='' OR response#>>'{document,id}'=$3)`
 	if cursor != nil {
-		query += ` AND (created_at,id)<($4,$5)`
+		query += ` AND (created_at,id)<($6,$7)`
 		args = append(args, cursor.At, cursor.ID)
 	}
 	query += ` ORDER BY created_at DESC,id DESC LIMIT $2`
@@ -169,14 +177,21 @@ func (s *Store) readAppEvidenceText(ctx context.Context, app, root, operation st
 	if err != nil {
 		return out, err
 	}
+	versions, err := boundEvidenceVersions(ctx, s.DB, app, root)
+	if err != nil {
+		return out, err
+	}
 	row := s.DB.QueryRow(ctx, `SELECT `+evidenceColumns+`,
  substring(response#>>'{document,content}' FROM $3::integer FOR $4::integer),
  encode(sha256(convert_to(response::text,'UTF8')),'hex')
- FROM calls WHERE run_id=ANY($1) AND id=$2 AND `+documentReceipt, ids, operation, offset+1, limit+1)
+ FROM calls WHERE (run_id=ANY($1) OR (`+boundReceiptPredicate(5)+`)) AND id=$2 AND `+documentReceipt, ids, operation, offset+1, limit+1, JSON(versions))
 	if err = scanAppEvidence(row, &out.appEvidence, &out.Text, &out.Version); errors.Is(err, pgx.ErrNoRows) {
 		return out, stateError(404, "document receipt not found in this task")
 	} else if err != nil {
 		return out, err
+	}
+	if expected, ok := versions[operation]; ok && expected.Version != out.Version {
+		return out, stateError(409, "bound document receipt changed")
 	}
 	if version != "" && version != out.Version {
 		return out, stateError(409, "retained document changed; reload first segment")

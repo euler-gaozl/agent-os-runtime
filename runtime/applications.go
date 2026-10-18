@@ -8,12 +8,15 @@ import (
 )
 
 func (s *Server) applicationRoutes(mux *http.ServeMux) {
+	s.evidenceBindingRoutes(mux)
 	mux.HandleFunc("POST /v1/apps/{app}/runs", wrap(func(w http.ResponseWriter, r *http.Request) error {
 		app := r.PathValue("app")
 		var in struct {
-			Agent    Ref             `json:"agent"`
-			Task     string          `json:"task"`
-			Metadata json.RawMessage `json:"metadata"`
+			Agent                      Ref             `json:"agent"`
+			Task                       string          `json:"task"`
+			Metadata                   json.RawMessage `json:"metadata"`
+			EvidenceSourceRun          string          `json:"evidence_source_run"`
+			ExpectedSourceResultSHA256 string          `json:"expected_source_result_sha256"`
 		}
 		if e := decodeLimit(w, r, &in, s.Store.submissionBodyLimit()); e != nil {
 			return e
@@ -52,11 +55,17 @@ func (s *Server) applicationRoutes(mux *http.ServeMux) {
 			in.Metadata = JSON(map[string]any{})
 		}
 		var previous []byte
-		if e = tx.QueryRow(r.Context(), "INSERT INTO app_runs(run_id,app,metadata) VALUES($1,$2,$3) ON CONFLICT(run_id) DO UPDATE SET run_id=excluded.run_id RETURNING metadata", id, app, in.Metadata).Scan(&previous); e != nil {
+		var previousSource string
+		if e = tx.QueryRow(r.Context(), "INSERT INTO app_runs(run_id,app,metadata,evidence_source_run) VALUES($1,$2,$3,$4) ON CONFLICT(run_id) DO UPDATE SET run_id=excluded.run_id RETURNING metadata,evidence_source_run", id, app, in.Metadata, in.EvidenceSourceRun).Scan(&previous, &previousSource); e != nil {
 			return e
 		}
-		if canonicalHash(previous) != canonicalHash(in.Metadata) {
+		if canonicalHash(previous) != canonicalHash(in.Metadata) || previousSource != in.EvidenceSourceRun {
 			return errors.New("submission key reused with changed app metadata")
+		}
+		if in.EvidenceSourceRun != "" {
+			if _, e = bindAppEvidence(r.Context(), tx, app, id, "submission", bindEvidenceRequest{SourceRunID: in.EvidenceSourceRun, ExpectedSourceResultSHA256: in.ExpectedSourceResultSHA256, Reason: "Evidence source selected at task submission"}); e != nil {
+				return e
+			}
 		}
 		if e = tx.Commit(r.Context()); e != nil {
 			return e
@@ -95,7 +104,11 @@ func (s *Server) applicationRoutes(mux *http.ServeMux) {
 		if e != nil {
 			return e
 		}
-		jsonResponse(w, 200, map[string]any{"id": run.ID, "status": run.Status, "step": run.Step, "result": run.State.Result, "error": run.State.Error, "created_at": run.CreatedAt, "metadata": metadata})
+		binding, _, e := readEvidenceBinding(r.Context(), s.Store.DB, run.ID)
+		if e != nil {
+			return e
+		}
+		jsonResponse(w, 200, map[string]any{"id": run.ID, "status": run.Status, "step": run.Step, "result": run.State.Result, "result_sha256": resultDigest(run.State.Result), "error": run.State.Error, "created_at": run.CreatedAt, "metadata": metadata, "evidence_binding": binding})
 		return nil
 	}))
 	mux.HandleFunc("POST /v1/apps/{app}/runs/{id}/cancel", wrap(func(w http.ResponseWriter, r *http.Request) error {

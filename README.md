@@ -1,5 +1,13 @@
 # Agent OS Runtime
 
+## 修订任务的固定证据关联（2026-10-18）
+
+应用提交可指定 `evidence_source_run` 和可选 `expected_source_result_sha256`。Runtime 在创建事务中校验同应用的较早终态任务，将最多 256 份成功 `document_read` 回执及其请求/响应摘要固定保存到本域 `app_evidence_bindings`；新任务与关联同时提交或回滚。重复提交不能变更源任务，子任务原文可继承，再次修订复制固定清单，不递归展开未来新增阅读记录。
+
+既有终态任务可调用 `POST /v1/apps/{app}/runs/{id}/evidence-binding`，提交 `source_run_id`、必需的 `expected_source_result_sha256` 与 `reason`，补充不可替换的 `retrospective` 关联。此操作不改写原输入、结果、任务状态或工具调用。任务 GET 返回 `result_sha256` 和 `evidence_binding`；原文 API 返回实际执行阅读的 `run_id`。关联只扩展原文投影，草稿、模型消息、笔记和其他工具不继承。版本变化、缺失回执或授权失效明确失败。
+
+先执行本仓迁移，再升级 Runtime 与调用方。Runtime 角色仅获关联表 SELECT/INSERT；Worker 无该表权限。旧 Runtime 可在扩展后的数据库运行，但忽略关联，不能宣称具备此功能。平台协调器备份/恢复必须包含新增关系，绑定清单不替代原始回执备份。当前权限单位仍为应用服务身份，不是多租户个人账号。
+
 Agent 执行数据域的独立服务，负责任务状态、领取租约/fence、模型与工具回执、DSH 交互证据、工作状态、笔记和恢复。Worker 独立部署并消费固定 `execution` 模块；Runtime 不复制 Registry、Knowledge、Storage 或 Sandbox 的数据库逻辑。
 
 ## 分层与事务边界
