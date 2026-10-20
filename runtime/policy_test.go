@@ -16,6 +16,16 @@ func TestRuntimePeerBoundaries(t *testing.T) {
 		{"control", "POST", "/v1/notes/revise", true}, {"worker", "GET", "/v1/notes", false},
 		{"worker", "POST", "/v1/instances", true}, {"", "POST", "/v1/instances", false},
 		{"runtime", "GET", "/readyz", true}, {"futures", "GET", "/readyz", false},
+		{"futures", "GET", "/v1/apps/futures/runs/x/diagnostics", true},
+		{"futures", "POST", "/v1/apps/futures/runs/x/diagnostics", false},
+		{"futures", "GET", "/v1/apps/other/runs/x/diagnostics", false},
+		{"control", "GET", "/v1/apps/futures/runs/x/diagnostics", true},
+		{"knowledge", "GET", "/v1/apps/futures/runs/x/diagnostics", false},
+		{"futures", "GET", "/v1/apps/futures/run-failures", true},
+		{"futures", "GET", "/v1/apps/other/run-failures", false},
+		{"futures", "POST", "/v1/apps/futures/run-failures", false},
+		{"control", "GET", "/v1/apps/other/run-failures", true},
+		{"knowledge", "GET", "/v1/apps/futures/run-failures", false},
 	} {
 		if got := Authorize(test.who, test.method, test.path); got != test.allow {
 			t.Errorf("%s %s %s authorization=%v", test.who, test.method, test.path, got)

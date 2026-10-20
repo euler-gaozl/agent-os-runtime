@@ -34,6 +34,7 @@ func (s *Server) Handler(c servicehttp.Config) http.Handler {
 		s.applicationRoutes(m)
 		s.appEvidenceRoutes(m)
 		s.appReceiptRoutes(m)
+		s.appDiagnosticsRoutes(m)
 		s.sandboxAuthorizationRoutes(m)
 	})
 }

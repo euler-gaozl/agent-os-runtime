@@ -32,6 +32,21 @@ func Authorize(caller, method, path string) bool {
 	if strings.HasSuffix(path, "/calls/page") || strings.HasSuffix(path, "/calls/record") {
 		return caller == "control" && method == "GET" && strings.HasPrefix(path, "/v1/runs/")
 	}
+	// App failure records and diagnostics are read-only projections. A business
+	// service may read only its own app prefix; control may read any app. The
+	// handler additionally verifies app_runs(app, run_id) ownership.
+	if strings.HasSuffix(path, "/diagnostics") && strings.HasPrefix(path, "/v1/apps/") {
+		if method != "GET" {
+			return false
+		}
+		return caller == "control" || (caller == "futures" && strings.HasPrefix(path, "/v1/apps/futures/runs/"))
+	}
+	if strings.HasSuffix(path, "/run-failures") && strings.HasPrefix(path, "/v1/apps/") {
+		if method != "GET" {
+			return false
+		}
+		return caller == "control" || (caller == "futures" && strings.HasPrefix(path, "/v1/apps/futures/"))
+	}
 	// This derived ledger is not exposed through generic run-prefix grants.
 	// Worker state operations use the separate fenced source-engine route.
 	if strings.HasSuffix(path, "/working-state") || strings.HasSuffix(path, "/source-recovery") {
